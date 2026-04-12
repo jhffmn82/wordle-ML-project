@@ -2,4 +2,4 @@
 # 
 # Expected files:
 #   dqn_model.pt  - Deep Q-Network weights
-#   a2c_model.pt  - Advantage Actor-Critic weights
+#   q_table.pkl   - Tabular Q-Learning policy table
