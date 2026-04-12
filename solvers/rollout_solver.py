@@ -1,17 +1,17 @@
 """
-Solver 5: Rollout (Bhambri, Bhattacharjee & Bertsekas, 2022)
+Solver 5: Memoized Rollout (Bhambri, Bhattacharjee & Bertsekas, 2022)
 
-Improves the info gain heuristic with one-step lookahead:
-  1. Use info gain (minimax) to get top-K candidate guesses
-  2. For each candidate, simulate the rest of the game for every
-     remaining word using the frequency solver as base heuristic
+Implements the rollout approach from the paper:
+  1. Score all words by minimax (information gain) to get top 10 candidates
+  2. For each candidate, simulate the full game forward for every remaining
+     word using the frequency solver as base heuristic
   3. Pick the candidate with the lowest average total guesses
 
-Rollout only activates when remaining words <= threshold (default 20).
-Above that, uses info gain directly. This keeps runtime reasonable
-while improving endgame decisions where ties matter most.
+Results are memoized: each game state → best guess is cached to disk.
+First run is slow, but each subsequent run is faster as the cache fills.
+Eventually all states are cached and evaluation is instant.
 
-Runtime: ~30 minutes for full evaluation (similar to info gain).
+Cache key: tuple of (guess, feedback) pairs — uniquely identifies game state.
 
 Reference:
     Bhambri, S. et al. (2022). RL Methods for Wordle. arXiv:2211.10298.
@@ -20,6 +20,7 @@ Reference:
 import os
 import sys
 import time
+import pickle
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,99 +29,110 @@ from engine.wordle_env import WordleGame, load_word_list, get_feedback, filter_w
 from solvers.frequency_solver import FrequencySolver
 
 
+DEFAULT_CACHE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "models", "rollout_cache.pkl"
+)
+
+
 class RolloutSolver:
 
-    def __init__(self, word_list_path=None, top_k=5, rollout_threshold=20):
+    def __init__(self, word_list_path=None, top_k=10, cache_path=None):
         """
         Args:
             word_list_path: path to wordle.txt
-            top_k: number of top candidates to rollout (default 5)
-            rollout_threshold: only do rollout when remaining <= this (default 20)
+            top_k: number of top candidates to rollout (paper uses 10)
+            cache_path: where to save/load the memoization cache
         """
         self.all_words = load_word_list(word_list_path)
         self.remaining = list(self.all_words)
+        self.guesses = []
+        self.feedbacks = []
         self.top_k = top_k
-        self.rollout_threshold = rollout_threshold
 
         # Base heuristic for forward simulation
         self._base_solver = FrequencySolver(word_list_path)
 
-        # Cache first guess (info gain minimax on full list)
-        print("Computing best opening guess...", flush=True)
-        t0 = time.time()
-        self._first_guess = self._minimax_best(self.all_words, self.all_words)
-        print(f"  Best opener: {self._first_guess.upper()} ({time.time()-t0:.1f}s)")
+        # Cache: game_state_key -> best_guess
+        self.cache_path = cache_path or DEFAULT_CACHE_PATH
+        self.cache = self._load_cache()
+        self._cache_hits = 0
+        self._cache_misses = 0
+
+    def _load_cache(self):
+        """Load cache from disk if it exists."""
+        if os.path.exists(self.cache_path):
+            try:
+                with open(self.cache_path, 'rb') as f:
+                    cache = pickle.load(f)
+                print(f"Loaded rollout cache: {len(cache)} states from {self.cache_path}")
+                return cache
+            except Exception as e:
+                print(f"Warning: could not load cache: {e}")
+        return {}
+
+    def save_cache(self):
+        """Save cache to disk."""
+        os.makedirs(os.path.dirname(self.cache_path), exist_ok=True)
+        with open(self.cache_path, 'wb') as f:
+            pickle.dump(self.cache, f)
+        print(f"Saved rollout cache: {len(self.cache)} states to {self.cache_path}")
+
+    def _state_key(self):
+        """Build cache key from current game history."""
+        return tuple((g, tuple(fb)) for g, fb in zip(self.guesses, self.feedbacks))
 
     def reset(self):
         self.remaining = list(self.all_words)
+        self.guesses = []
+        self.feedbacks = []
 
     def update(self, guess, feedback):
+        self.guesses.append(guess.lower())
+        self.feedbacks.append(feedback)
         self.remaining = filter_words(self.remaining, guess, feedback)
 
     def get_guess(self, game_state=None):
         if game_state is not None:
             self._sync_from_state(game_state)
 
-        n = len(self.remaining)
+        n_remaining = len(self.remaining)
 
-        if n <= 1:
+        if n_remaining <= 1:
             return self.remaining[0] if self.remaining else self.all_words[0]
-        if n == 2:
+        if n_remaining == 2:
             return self.remaining[0]
-        if n == len(self.all_words):
-            return self._first_guess
 
-        # If remaining is small enough, do rollout
-        if n <= self.rollout_threshold:
-            return self._rollout_best(self.all_words, self.remaining)
+        # Check cache
+        key = self._state_key()
+        if key in self.cache:
+            self._cache_hits += 1
+            return self.cache[key]
 
-        # Otherwise, use minimax info gain directly
-        return self._minimax_best(self.all_words, self.remaining)
+        # Cache miss — compute via rollout
+        self._cache_misses += 1
+        best_guess = self._rollout(self.remaining)
 
-    def _minimax_best(self, candidates, remaining):
-        """Pick the guess that minimizes worst-case partition (info gain)."""
-        best_word = remaining[0]
-        best_worst = len(remaining) + 1
+        # Store in cache
+        self.cache[key] = best_guess
+        return best_guess
 
-        for guess in candidates:
-            groups = Counter()
-            for target in remaining:
-                fb = tuple(get_feedback(guess, target))
-                groups[fb] += 1
-            worst = max(groups.values())
-
-            if worst < best_worst or (worst == best_worst and guess in remaining):
-                best_worst = worst
-                best_word = guess
-            if best_worst == 1:
-                break
-
-        return best_word
-
-    def _rollout_best(self, candidates, remaining):
+    def _rollout(self, remaining):
         """
-        Rollout: score top-K candidates by simulating the full game forward.
+        Full rollout: score candidates, then simulate top-K forward.
 
-        1. Score all candidates with minimax to get top K
-        2. For each of the K, simulate the game for every remaining word
-           using frequency solver
-        3. Pick the one with lowest average total guesses
+        When remaining is large (>50), use frequency scoring for speed.
+        When small, use minimax for precision.
         """
-        # Step 1: get top K by minimax score
-        scored = []
-        for guess in candidates:
-            groups = Counter()
-            for target in remaining:
-                fb = tuple(get_feedback(guess, target))
-                groups[fb] += 1
-            worst = max(groups.values())
-            is_remaining = guess in remaining
-            scored.append((worst, not is_remaining, guess))
+        # Step 1: Get top K candidates
+        if len(remaining) > 50:
+            # Use frequency scoring for speed on large lists
+            top_candidates = self._top_k_by_frequency(remaining)
+        else:
+            # Use minimax for precision on small lists
+            top_candidates = self._top_k_by_minimax(remaining)
 
-        scored.sort()
-        top_candidates = [g for _, _, g in scored[:self.top_k]]
-
-        # Step 2: rollout each candidate
+        # Step 2: Rollout each candidate
         best_word = top_candidates[0]
         best_avg = float('inf')
 
@@ -128,19 +140,15 @@ class RolloutSolver:
             total_guesses = 0
 
             for target in remaining:
-                # Simulate: make this guess, then play out with frequency solver
                 feedback = get_feedback(guess, target)
 
                 if feedback == [2, 2, 2, 2, 2]:
                     total_guesses += 1
                     continue
 
-                # Filter remaining after this guess
                 new_remaining = filter_words(remaining, guess, feedback)
-
-                # Play out rest with frequency solver
-                guesses_used = 1 + self._simulate_forward(target, new_remaining)
-                total_guesses += guesses_used
+                guesses_needed = 1 + self._simulate_forward(target, new_remaining)
+                total_guesses += guesses_needed
 
             avg = total_guesses / len(remaining)
 
@@ -150,17 +158,45 @@ class RolloutSolver:
 
         return best_word
 
+    def _top_k_by_frequency(self, remaining):
+        """Get top K candidates using frequency scoring (fast)."""
+        self._base_solver.reset()
+        self._base_solver.remaining = list(remaining)
+        lf = self._base_solver._letter_frequency(remaining)
+        pf = self._base_solver._letter_frequency_place(remaining)
+
+        scored = []
+        for w in self.all_words:
+            s = self._base_solver._word_value(w, lf, pf)
+            scored.append((s, w))
+        scored.sort(reverse=True)
+        return [w for _, w in scored[:self.top_k]]
+
+    def _top_k_by_minimax(self, remaining):
+        """Get top K candidates using minimax scoring (precise)."""
+        scored = []
+        for guess in self.all_words:
+            groups = Counter()
+            for target in remaining:
+                fb = tuple(get_feedback(guess, target))
+                groups[fb] += 1
+            worst = max(groups.values())
+            is_remaining = guess in remaining
+            scored.append((worst, not is_remaining, guess))
+        scored.sort()
+        return [g for _, _, g in scored[:self.top_k]]
+
     def _simulate_forward(self, target, remaining):
         """
-        Simulate the rest of a game using frequency solver.
+        Simulate the rest of a game using frequency solver as base heuristic.
         Returns number of additional guesses needed.
         """
         self._base_solver.reset()
         self._base_solver.remaining = list(remaining)
 
-        for turn in range(6):  # max 6 more turns
+        for turn in range(6):
             if len(self._base_solver.remaining) == 0:
-                return 6  # failed
+                return 6
             guess = self._base_solver.get_guess()
             feedback = get_feedback(guess, target)
 
@@ -169,12 +205,23 @@ class RolloutSolver:
 
             self._base_solver.update(guess, feedback)
 
-        return 6  # failed
+        return 6
 
     def _sync_from_state(self, game_state):
         self.remaining = list(self.all_words)
+        self.guesses = []
+        self.feedbacks = []
         for guess, feedback in zip(game_state["guesses"], game_state["feedbacks"]):
             self.update(guess, feedback)
+
+    def cache_stats(self):
+        total = self._cache_hits + self._cache_misses
+        if total == 0:
+            return "No lookups yet"
+        pct = self._cache_hits / total * 100
+        return (f"Cache: {len(self.cache)} states, "
+                f"{self._cache_hits} hits / {self._cache_misses} misses "
+                f"({pct:.1f}% hit rate)")
 
 
 def play_game(solver, target, verbose=False):
@@ -191,11 +238,12 @@ def play_game(solver, target, verbose=False):
 
         if verbose:
             n = len(solver.remaining)
-            mode = "rollout" if n <= solver.rollout_threshold else "minimax"
+            key = solver._state_key()
+            cached = "cache" if key in solver.cache else "computed"
             symbols = ["⬛", "🟨", "🟩"]
             display = " ".join(symbols[f] for f in feedback)
             print(f"  Turn {game.turn}: {guess.upper()}  {display}  "
-                  f"({n} left, {mode}, {dt:.2f}s)")
+                  f"({n} left, {cached}, {dt:.2f}s)")
 
         if game.is_solved():
             if verbose:
@@ -214,3 +262,6 @@ if __name__ == "__main__":
     for word in test_words:
         print(f"\nTarget: {word.upper()}")
         play_game(solver, word, verbose=True)
+
+    print(f"\n{solver.cache_stats()}")
+    solver.save_cache()
