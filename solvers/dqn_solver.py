@@ -135,14 +135,6 @@ class DQNSolver:
             output = self.model(state_tensor)
             scores = torch.matmul(output, self.word_encodings.T).squeeze(0)
 
-        # Only pick from remaining words — block everything else
-        remaining_set = set(self.remaining)
-        mask = torch.tensor(
-            [0.0 if w in remaining_set else float('-inf') for w in self.all_words],
-            dtype=torch.float32
-        )
-        scores = scores + mask
-
         best_idx = scores.argmax().item()
         return self.all_words[best_idx]
 
