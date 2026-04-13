@@ -1,15 +1,21 @@
----
-title: Wordle ML
-emoji: 🟩
-colorFrom: green
-colorTo: gray
-sdk: docker
-app_port: 7860
-pinned: false
----
+FROM python:3.11-slim
 
-# Wordle ML — Heuristic vs. Machine Learning Solvers
+WORKDIR /app
 
-Comparing 6 algorithmic strategies for solving Wordle against the known optimal solution (Bertsimas & Paskov, 2024).
+# Install system deps
+RUN apt-get update && apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
 
-**Try it:** Use the Solver Assistant to get AI help while playing, or watch solvers play in Autoplay mode.
+# Install Python deps (CPU-only torch for smaller image)
+COPY requirements.txt .
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy project files
+COPY . .
+
+# HF Spaces runs on port 7860
+EXPOSE 7860
+
+# Run from web/ directory
+CMD ["python", "web/app.py"]
