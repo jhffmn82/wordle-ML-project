@@ -1,24 +1,14 @@
 """
 Solver 3: Deep Q-Network (DQN) Solver
 
-Uses a trained neural network to estimate Q-values for each possible
-guess given the current board state.
+Updated design:
+- Supports optional curated opening constraints
+- Turn 1 can be restricted to set1
+- Turn 2 can be restricted to set2
+- Later turns are unrestricted
 
-Architecture:
-    - Input: 417-dim state vector
-    - Hidden: 2 layers of 512 neurons with ReLU
-    - Output: 130-dim vector (26 letters × 5 positions)
-    - Action selection: dot product output with one-hot word encodings
-
-Training uses curated exploration:
-    - Phase 1: random guesses drawn from Set A (narrowing words)
-    - Phase 2: random guesses drawn from Set B (broader coverage)
-    - Phase 3: random guesses from full vocabulary
-    Target word is always random from the full list.
-
-References:
-    Anderson, B.J. & Meyer, J.G. (2022). arXiv:2202.00557.
-    Ho, A. (2022). Wordle Solving with Deep Reinforcement Learning.
+This keeps the existing architecture and 130-dim word encoding, but prevents
+degenerate opening moves such as BIDDY from dominating inference.
 """
 
 import os
@@ -38,8 +28,6 @@ except ImportError:
 from engine.wordle_env import load_word_list, filter_words
 from engine.state_encoder import encode_state, encode_words_onehot, STATE_DIM
 
-
-# --- Model Architecture ---
 
 HIDDEN_DIM = 512
 OUTPUT_DIM = 130  # 26 letters × 5 positions
@@ -82,11 +70,8 @@ if TORCH_AVAILABLE:
             return len(self.buffer)
 
 
-# --- Solver ---
-
 class DQNSolver:
-
-    def __init__(self, model_path=None, word_list_path=None):
+    def __init__(self, model_path=None, word_list_path=None, set1=None, set2=None):
         if not TORCH_AVAILABLE:
             raise ImportError("PyTorch required. Install: pip install torch")
 
@@ -96,17 +81,22 @@ class DQNSolver:
         self.feedbacks = []
         self.turn = 0
 
+        self.set1 = list(set1) if set1 is not None else None
+        self.set2 = list(set2) if set2 is not None else None
+
+        self.word_to_idx = {w: i for i, w in enumerate(self.all_words)}
+
         self.word_encodings = torch.tensor(
             encode_words_onehot(self.all_words), dtype=torch.float32
         )
 
         self.model = DQNNetwork()
         if model_path and os.path.exists(model_path):
-            self.model.load_state_dict(torch.load(model_path, map_location='cpu', weights_only=True))
+            self.model.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=True))
             print(f"Loaded DQN model from {model_path}")
-        else:
-            if model_path:
-                print("WARNING: No trained model loaded.")
+        elif model_path:
+            print("WARNING: No trained model loaded.")
+
         self.model.eval()
 
     def reset(self):
@@ -120,6 +110,28 @@ class DQNSolver:
         self.feedbacks.append(feedback)
         self.turn += 1
         self.remaining = filter_words(self.remaining, guess, feedback)
+
+    def _allowed_words_for_turn(self):
+        """
+        Hard opening constraints:
+        - turn 0: restrict to set1 if provided
+        - turn 1: prefer set2 ∩ remaining; else set2 if provided
+        - later: unrestricted
+        """
+        if self.turn == 0 and self.set1:
+            allowed = [w for w in self.set1 if w in self.word_to_idx]
+            if allowed:
+                return allowed
+
+        if self.turn == 1 and self.set2:
+            allowed = [w for w in self.set2 if w in set(self.remaining)]
+            if allowed:
+                return allowed
+            allowed = [w for w in self.set2 if w in self.word_to_idx]
+            if allowed:
+                return allowed
+
+        return self.all_words
 
     def get_guess(self, game_state=None):
         if game_state is not None:
@@ -135,8 +147,19 @@ class DQNSolver:
             output = self.model(state_tensor)
             scores = torch.matmul(output, self.word_encodings.T).squeeze(0)
 
-        best_idx = scores.argmax().item()
-        return self.all_words[best_idx]
+        allowed_words = self._allowed_words_for_turn()
+
+        # Masked argmax over allowed words only
+        best_word = allowed_words[0]
+        best_score = -float("inf")
+        for word in allowed_words:
+            idx = self.word_to_idx[word]
+            score = scores[idx].item()
+            if score > best_score:
+                best_score = score
+                best_word = word
+
+        return best_word
 
     def _sync_from_state(self, game_state):
         self.remaining = list(self.all_words)
