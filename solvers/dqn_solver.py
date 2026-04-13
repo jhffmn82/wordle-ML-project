@@ -1,21 +1,27 @@
 """
-Solver 3: Deep Q-Network (DQN) Solver
+Solver: Deep Q-Network (DQN)
 
-Updated design:
-- Supports optional curated opening constraints loaded from disk
-- Turn 1 can be restricted to set1
-- Turn 2 can be restricted to set2
-- Later turns are unrestricted
-- Works outside the notebook for web deployment
+A neural network that maps Wordle game states to word scores.
 
-This keeps the existing architecture and 130-dim word encoding, but prevents
-degenerate opening moves such as BIDDY from dominating inference.
+Architecture (following Ho, 2022):
+    Input:  417-dim state vector (letter-position-status history + absent flags + turn)
+    Hidden: 512 → ReLU → 512 → ReLU
+    Output: 130-dim vector (26 letters × 5 positions)
+
+Action selection:
+    Each vocabulary word is encoded as a 130-dim one-hot vector.  The network
+    output is scored against every word encoding via dot product, and the
+    highest-scoring word is selected.  Words already guessed this game are
+    masked out so the model never repeats a guess.
+
+References:
+    Ho, A. (2022). Solving Wordle with Reinforcement Learning.
+    Mnih, V. et al. (2015). Human-level control through deep RL. Nature 518.
 """
 
 import os
 import sys
 import random
-import pickle
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -35,31 +41,9 @@ HIDDEN_DIM = 512
 OUTPUT_DIM = 130  # 26 letters × 5 positions
 
 
-def load_curated_sets(path):
-    """
-    Load curated opening sets from a pickle file.
-
-    Expected format:
-        {
-            "set1": [...],
-            "set2": [...],
-            "set3": [...]
-        }
-    """
-    if not path:
-        return None
-
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Curated sets file not found: {path}")
-
-    with open(path, "rb") as f:
-        data = pickle.load(f)
-
-    if not isinstance(data, dict):
-        raise ValueError(f"Curated sets file must contain a dict, got {type(data)}")
-
-    return data
-
+# ---------------------------------------------------------------------------
+# Network and replay buffer (used by both solver and training code)
+# ---------------------------------------------------------------------------
 
 if TORCH_AVAILABLE:
     class DQNNetwork(nn.Module):
@@ -77,6 +61,8 @@ if TORCH_AVAILABLE:
             return self.net(state)
 
     class ReplayBuffer:
+        """Simple uniform experience replay buffer."""
+
         def __init__(self, capacity=100000):
             from collections import deque
             self.buffer = deque(maxlen=capacity)
@@ -99,39 +85,25 @@ if TORCH_AVAILABLE:
             return len(self.buffer)
 
 
+# ---------------------------------------------------------------------------
+# Solver (inference)
+# ---------------------------------------------------------------------------
+
 class DQNSolver:
-    def __init__(self, model_path=None, word_list_path=None, curated_sets_path=None):
+    """
+    Wordle solver backed by a trained DQN.
+
+    At each turn the model scores every word in the vocabulary via dot product
+    with its 130-dim output.  Already-guessed words are masked to -inf so the
+    model never wastes a turn repeating a guess.
+    """
+
+    def __init__(self, model_path=None, word_list_path=None):
         if not TORCH_AVAILABLE:
             raise ImportError("PyTorch required. Install: pip install torch")
 
         self.all_words = load_word_list(word_list_path)
-        self.remaining = list(self.all_words)
-        self.guesses = []
-        self.feedbacks = []
-        self.turn = 0
-
         self.word_to_idx = {w: i for i, w in enumerate(self.all_words)}
-
-        # Curated opening sets loaded from disk for deployment/web use
-        self.set1 = None
-        self.set2 = None
-        self.set3 = None
-
-        if curated_sets_path is not None:
-            curated = load_curated_sets(curated_sets_path)
-
-            raw_set1 = curated.get("set1", [])
-            raw_set2 = curated.get("set2", [])
-            raw_set3 = curated.get("set3", [])
-
-            self.set1 = [w for w in raw_set1 if w in self.word_to_idx]
-            self.set2 = [w for w in raw_set2 if w in self.word_to_idx]
-            self.set3 = [w for w in raw_set3 if w in self.word_to_idx]
-
-            print(
-                f"Loaded curated sets from {curated_sets_path} "
-                f"(set1={len(self.set1)}, set2={len(self.set2)}, set3={len(self.set3)})"
-            )
 
         self.word_encodings = torch.tensor(
             encode_words_onehot(self.all_words), dtype=torch.float32
@@ -139,45 +111,37 @@ class DQNSolver:
 
         self.model = DQNNetwork()
         if model_path and os.path.exists(model_path):
-            self.model.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=True))
+            self.model.load_state_dict(
+                torch.load(model_path, map_location="cpu", weights_only=True)
+            )
             print(f"Loaded DQN model from {model_path}")
         elif model_path:
-            print("WARNING: No trained model loaded.")
+            print("WARNING: No trained model found at", model_path)
 
         self.model.eval()
+        self.reset()
 
     def reset(self):
+        """Clear game state for a new game."""
         self.remaining = list(self.all_words)
         self.guesses = []
         self.feedbacks = []
         self.turn = 0
 
     def update(self, guess, feedback):
+        """Record a guess and its feedback, prune remaining candidates."""
         self.guesses.append(guess.lower())
         self.feedbacks.append(feedback)
         self.turn += 1
         self.remaining = filter_words(self.remaining, guess, feedback)
 
-    def _allowed_words_for_turn(self):
-        """
-        Hard opening constraints:
-        - turn 0: restrict to set1 if provided
-        - turn 1: prefer set2 ∩ remaining; else set2 if provided
-        - later: unrestricted
-        """
-        if self.turn == 0 and self.set1:
-            return self.set1
-
-        if self.turn == 1 and self.set2:
-            remaining_set = set(self.remaining)
-            allowed = [w for w in self.set2 if w in remaining_set]
-            if allowed:
-                return allowed
-            return self.set2
-
-        return self.all_words
-
     def get_guess(self, game_state=None):
+        """
+        Select the best word according to the Q-network.
+
+        If only one candidate remains, return it directly.  Otherwise score
+        all words, mask out previous guesses, and take the argmax.
+        """
         if game_state is not None:
             self._sync_from_state(game_state)
 
@@ -191,21 +155,16 @@ class DQNSolver:
             output = self.model(state_tensor)
             scores = torch.matmul(output, self.word_encodings.T).squeeze(0)
 
-        allowed_words = self._allowed_words_for_turn()
+        # Mask out already-guessed words so they are never selected
+        for guess in self.guesses:
+            if guess in self.word_to_idx:
+                scores[self.word_to_idx[guess]] = -float("inf")
 
-        # Masked argmax over allowed words only
-        best_word = allowed_words[0]
-        best_score = -float("inf")
-        for word in allowed_words:
-            idx = self.word_to_idx[word]
-            score = scores[idx].item()
-            if score > best_score:
-                best_score = score
-                best_word = word
-
-        return best_word
+        best_idx = scores.argmax().item()
+        return self.all_words[best_idx]
 
     def _sync_from_state(self, game_state):
+        """Rebuild solver state from an external game_state dict."""
         self.remaining = list(self.all_words)
         self.guesses = []
         self.feedbacks = []
@@ -214,10 +173,21 @@ class DQNSolver:
             self.update(guess, feedback)
 
 
+# ---------------------------------------------------------------------------
+# Quick self-test
+# ---------------------------------------------------------------------------
+
 if __name__ == "__main__":
     if not TORCH_AVAILABLE:
         print("PyTorch not installed.")
     else:
         solver = DQNSolver()
-        print(f"DQN Solver: {len(solver.all_words)} words")
+        print(f"DQN Solver: {len(solver.all_words)} words, state_dim={STATE_DIM}")
         print(f"Parameters: {sum(p.numel() for p in solver.model.parameters()):,}")
+
+        # Verify guess masking works
+        solver.reset()
+        solver.guesses = ["slate"]
+        g = solver.get_guess()
+        assert g != "slate", "Mask failed: model re-guessed 'slate'"
+        print(f"Mask check passed (first guess after 'slate': {g})")
