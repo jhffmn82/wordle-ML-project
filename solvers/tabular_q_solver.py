@@ -7,7 +7,7 @@ last guess, giving ~30 possible states.
 
 5 strategies:
   0: Random from remaining words
-  1: Pick from curated narrowing list (Set A)
+  1: Pick from curated narrowing list
   2: Best by letter frequency among remaining
   3: Smart (full filter using green/yellow/gray + frequency pick)
   4: Exclude-only (remove grays only, then frequency pick)
@@ -28,6 +28,34 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from engine.wordle_env import WordleGame, load_word_list, get_feedback, filter_words
 
 
+# Default curated set path for deployment / non-notebook use
+DEFAULT_CURATED_SET3_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "models",
+    "curated_set3.pkl"
+)
+
+
+def load_curated_words(curated_words=None, curated_path=DEFAULT_CURATED_SET3_PATH):
+    """
+    Load curated words.
+
+    Priority:
+    1. If curated_words is explicitly passed, use it
+    2. Else, try to load models/curated_set3.pkl
+    3. Else, fall back to []
+    """
+    if curated_words is not None:
+        return list(curated_words)
+
+    if curated_path and os.path.exists(curated_path):
+        with open(curated_path, "rb") as f:
+            loaded = pickle.load(f)
+        return list(loaded)
+
+    return []
+
+
 # ---- Strategy functions ----
 
 def strategy_random(remaining, all_words, green_pos, yellow_pos, gray_letters, curated=None):
@@ -38,9 +66,10 @@ def strategy_random(remaining, all_words, green_pos, yellow_pos, gray_letters, c
 
 
 def strategy_curated(remaining, all_words, green_pos, yellow_pos, gray_letters, curated=None):
-    """Pick from the curated narrowing word list (Set A). Skip words already eliminated."""
+    """Pick from the curated narrowing word list. Skip words already eliminated."""
     if curated:
-        valid = [w for w in curated if w in set(remaining)]
+        remaining_set = set(remaining)
+        valid = [w for w in curated if w in remaining_set]
         if valid:
             return random.choice(valid)
         # If no curated words remain, pick any curated word for info gathering
@@ -68,7 +97,6 @@ def strategy_exclude(remaining, all_words, green_pos, yellow_pos, gray_letters, 
     """Only use gray info to exclude, then pick by frequency. Ignores yellow positions."""
     if not remaining:
         return random.choice(all_words)
-    # Filter using only gray letters
     filtered = [w for w in all_words if not any(c in gray_letters for c in w)]
     if not filtered:
         filtered = remaining
@@ -100,10 +128,11 @@ STRATEGY_NAMES = ["random", "curated", "frequency", "smart", "exclude"]
 
 class TabularQSolver:
 
-    def __init__(self, q_table_path=None, word_list_path=None, curated_words=None):
+    def __init__(self, q_table_path=None, word_list_path=None,
+                 curated_words=None, curated_path=DEFAULT_CURATED_SET3_PATH):
         self.all_words = load_word_list(word_list_path)
         self.remaining = list(self.all_words)
-        self.curated = curated_words or []
+        self.curated = load_curated_words(curated_words=curated_words, curated_path=curated_path)
         self.green_pos = [''] * 5
         self.yellow_pos = [''] * 5
         self.gray_letters = set()
@@ -117,9 +146,13 @@ class TabularQSolver:
                 saved = pickle.load(f)
                 self.q_table.update(saved)
             print(f"Loaded Q-table from {q_table_path} ({len(saved)} states)")
+        elif q_table_path:
+            print("WARNING: No Q-table loaded. Solver will use random strategy selection.")
+
+        if self.curated:
+            print(f"Loaded {len(self.curated)} curated words")
         else:
-            if q_table_path:
-                print("WARNING: No Q-table loaded. Solver will use random strategy selection.")
+            print("WARNING: No curated words loaded. Curated strategy will fall back to random.")
 
     def reset(self):
         self.remaining = list(self.all_words)
@@ -152,12 +185,10 @@ class TabularQSolver:
         if len(self.remaining) <= 1:
             return self.remaining[0] if self.remaining else random.choice(self.all_words)
 
-        # Pick the best strategy for current state
         state = self.last_feedback
         q_values = self.q_table[state]
         best_action = int(np.argmax(q_values))
 
-        # Execute the chosen strategy
         strategy_fn = STRATEGIES[best_action]
         return strategy_fn(
             self.remaining, self.all_words,
@@ -176,15 +207,20 @@ class TabularQSolver:
 def compute_reward(feedback, solved, failed):
     reward = 0.0
     for fb in feedback:
-        if fb == 2: reward += 5.0
-        elif fb == 1: reward += 2.0
-    if solved: reward += 25.0
-    elif failed: reward -= 15.0
+        if fb == 2:
+            reward += 5.0
+        elif fb == 1:
+            reward += 2.0
+    if solved:
+        reward += 25.0
+    elif failed:
+        reward -= 15.0
     return reward
 
 
 def train_tabular_q(num_episodes=10000, alpha=0.02, gamma=0.05,
                     epsilon=0.3, curated_words=None, word_list_path=None,
+                    curated_path=DEFAULT_CURATED_SET3_PATH,
                     log_interval=1000):
     """
     Train tabular Q-learning for Wordle strategy selection.
@@ -195,7 +231,7 @@ def train_tabular_q(num_episodes=10000, alpha=0.02, gamma=0.05,
     """
     all_words = load_word_list(word_list_path)
     q_table = defaultdict(lambda: np.zeros(5))
-    curated = curated_words or []
+    curated = load_curated_words(curated_words=curated_words, curated_path=curated_path)
 
     history = {"episode": [], "win_rate": [], "avg_guesses": []}
     recent_wins = []
@@ -214,19 +250,16 @@ def train_tabular_q(num_episodes=10000, alpha=0.02, gamma=0.05,
         while not game.is_over():
             state = last_state
 
-            # Epsilon-greedy action selection
             if random.random() < epsilon:
                 action = random.randint(0, 4)
             else:
                 action = int(np.argmax(q_table[state]))
 
-            # Execute strategy
             strategy_fn = STRATEGIES[action]
             guess = strategy_fn(remaining, all_words, green_pos, yellow_pos, gray_letters, curated)
 
             feedback = game.make_guess(guess)
 
-            # Update game knowledge
             greens = sum(1 for f in feedback if f == 2)
             yellows = sum(1 for f in feedback if f == 1)
             next_state = (greens, yellows)
@@ -247,7 +280,6 @@ def train_tabular_q(num_episodes=10000, alpha=0.02, gamma=0.05,
             reward = compute_reward(feedback, solved, failed)
             done = solved or failed
 
-            # Q-learning update
             old_q = q_table[state][action]
             if done:
                 q_table[state][action] = old_q + alpha * (reward - old_q)
@@ -278,7 +310,6 @@ def train_tabular_q(num_episodes=10000, alpha=0.02, gamma=0.05,
 
 
 def play_game(solver, target, verbose=False):
-    from engine.wordle_env import WordleGame
     game = WordleGame(target=target, word_list=solver.all_words)
     solver.reset()
 
@@ -317,7 +348,6 @@ if __name__ == "__main__":
         qvals = ", ".join(f"{v:.1f}" for v in q_table[state])
         print(f"  ({state[0]}g, {state[1]}y)  {STRATEGY_NAMES[best]:>15}  [{qvals}]")
 
-    # Test
     solver = TabularQSolver()
     solver.q_table.update(q_table)
 
