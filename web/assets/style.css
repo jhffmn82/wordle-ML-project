@@ -1,0 +1,307 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;900&display=swap');
+
+* { box-sizing: border-box; }
+
+body {
+    font-family: 'Outfit', sans-serif;
+    background: #121213;
+    color: #d7dadc;
+    margin: 0;
+    padding: 0;
+}
+
+/* ---- Layout ---- */
+.app-container {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.page-title {
+    text-align: center;
+    font-weight: 900;
+    font-size: 2.5rem;
+    letter-spacing: 0.15em;
+    margin-bottom: 0.3em;
+}
+
+.subtitle {
+    text-align: center;
+    color: #888;
+    font-size: 1rem;
+    line-height: 1.6;
+    margin-bottom: 1.5em;
+}
+
+.divider {
+    border: none;
+    border-top: 1px solid #333;
+    margin: 1.5em 0;
+}
+
+/* ---- Home Tiles ---- */
+.home-tiles {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.home-tile {
+    width: 56px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.8rem;
+    color: white;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+
+/* ---- Nav Buttons ---- */
+.nav-buttons {
+    display: flex;
+    gap: 12px;
+    margin: 1.5em 0;
+}
+
+.nav-btn {
+    flex: 1;
+    padding: 1em;
+    background: #1a1a2e;
+    border: 2px solid #333;
+    border-radius: 8px;
+    color: white;
+    font-family: 'Outfit', sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.nav-btn:hover {
+    border-color: #538d4e;
+    color: white;
+    text-decoration: none;
+}
+
+.nav-desc {
+    text-align: center;
+    font-size: 0.8rem;
+    color: #888;
+    margin-top: 6px;
+}
+
+/* ---- Wordle Grid ---- */
+.wordle-grid {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    margin: 1em 0;
+}
+
+.wordle-row {
+    display: flex;
+    gap: 6px;
+}
+
+.tile {
+    width: 62px;
+    height: 62px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 700;
+    font-size: 2rem;
+    color: white;
+    border-radius: 4px;
+    text-transform: uppercase;
+    cursor: default;
+    border: none;
+    outline: none;
+    padding: 0;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.tile-empty {
+    background: #121213;
+    border: 2px solid #3a3a3c;
+}
+
+.tile-active {
+    background: #272729;
+    border: 2px solid #565758;
+}
+
+.tile-gray {
+    background: #3a3a3c;
+    border: 2px solid #3a3a3c;
+    cursor: pointer;
+}
+
+.tile-gray:hover { border-color: #666; }
+
+.tile-yellow {
+    background: #b59f3b;
+    border: 2px solid #b59f3b;
+    cursor: pointer;
+}
+
+.tile-yellow:hover { border-color: #d4be4a; }
+
+.tile-green {
+    background: #538d4e;
+    border: 2px solid #538d4e;
+    cursor: pointer;
+}
+
+.tile-green:hover { border-color: #6aaf64; }
+
+/* ---- Suggestion Box ---- */
+.suggestion-box {
+    text-align: center;
+    padding: 12px;
+    margin: 10px 0;
+    background: #1a1a2e;
+    border: 2px solid #538d4e;
+    border-radius: 8px;
+}
+
+.suggestion-label {
+    font-size: 0.8rem;
+    color: #888;
+    margin-bottom: 4px;
+}
+
+.suggestion-word {
+    font-weight: 900;
+    font-size: 2.5rem;
+    letter-spacing: 0.2em;
+    color: #538d4e;
+}
+
+/* ---- Input ---- */
+.word-input {
+    width: 100%;
+    padding: 12px;
+    background: #1a1a2e;
+    border: 2px solid #333;
+    border-radius: 6px;
+    color: white;
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.1rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    text-align: center;
+    outline: none;
+}
+
+.word-input:focus { border-color: #538d4e; }
+
+.word-input::placeholder {
+    color: #555;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+/* ---- Action Buttons ---- */
+.action-buttons {
+    display: flex;
+    gap: 10px;
+    margin: 12px 0;
+}
+
+.btn {
+    flex: 1;
+    padding: 12px;
+    border: 2px solid #333;
+    border-radius: 6px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+}
+
+.btn-generate {
+    background: #538d4e;
+    border-color: #538d4e;
+    color: white;
+}
+
+.btn-generate:hover { background: #6aaf64; }
+
+.btn-reset {
+    background: #3a3a3c;
+    border-color: #3a3a3c;
+    color: white;
+}
+
+.btn-reset:hover { background: #555; }
+
+/* ---- Dropdown ---- */
+.solver-dropdown .Select-control {
+    background: #1a1a2e !important;
+    border-color: #333 !important;
+}
+
+/* ---- Status ---- */
+.status-win {
+    text-align: center;
+    padding: 12px;
+    background: #1a3a1a;
+    border: 2px solid #538d4e;
+    border-radius: 8px;
+    color: #538d4e;
+    font-weight: 700;
+    font-size: 1.2rem;
+    margin: 10px 0;
+}
+
+.status-fail {
+    text-align: center;
+    padding: 12px;
+    background: #3a1a1a;
+    border: 2px solid #9a3a3a;
+    border-radius: 8px;
+    color: #d44;
+    font-weight: 700;
+    font-size: 1.2rem;
+    margin: 10px 0;
+}
+
+.status-info {
+    text-align: center;
+    font-size: 0.85rem;
+    color: #888;
+    margin: 8px 0;
+}
+
+/* ---- About ---- */
+.about-content {
+    line-height: 1.7;
+    color: #ccc;
+}
+
+.about-content h3 { color: #d7dadc; margin-top: 1.5em; }
+.about-content table { width: 100%; border-collapse: collapse; margin: 1em 0; }
+.about-content th, .about-content td {
+    padding: 8px 12px;
+    border: 1px solid #333;
+    text-align: left;
+}
+.about-content th { background: #1a1a2e; color: #538d4e; }
+
+.footer-stats {
+    text-align: center;
+    color: #888;
+    font-size: 0.9rem;
+    margin-top: 2em;
+}
