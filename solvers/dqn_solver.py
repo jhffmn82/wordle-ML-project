@@ -2,10 +2,11 @@
 Solver 3: Deep Q-Network (DQN) Solver
 
 Updated design:
-- Supports optional curated opening constraints
+- Supports optional curated opening constraints loaded from disk
 - Turn 1 can be restricted to set1
 - Turn 2 can be restricted to set2
 - Later turns are unrestricted
+- Works outside the notebook for web deployment
 
 This keeps the existing architecture and 130-dim word encoding, but prevents
 degenerate opening moves such as BIDDY from dominating inference.
@@ -14,6 +15,7 @@ degenerate opening moves such as BIDDY from dominating inference.
 import os
 import sys
 import random
+import pickle
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,6 +33,33 @@ from engine.state_encoder import encode_state, encode_words_onehot, STATE_DIM
 
 HIDDEN_DIM = 512
 OUTPUT_DIM = 130  # 26 letters × 5 positions
+
+
+def load_curated_sets(path):
+    """
+    Load curated opening sets from a pickle file.
+
+    Expected format:
+        {
+            "set1": [...],
+            "set2": [...],
+            "set3": [...]
+        }
+    """
+    if not path:
+        return None
+
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Curated sets file not found: {path}")
+
+    with open(path, "rb") as f:
+        data = pickle.load(f)
+
+    if not isinstance(data, dict):
+        raise ValueError(f"Curated sets file must contain a dict, got {type(data)}")
+
+    return data
+
 
 if TORCH_AVAILABLE:
     class DQNNetwork(nn.Module):
@@ -71,7 +100,7 @@ if TORCH_AVAILABLE:
 
 
 class DQNSolver:
-    def __init__(self, model_path=None, word_list_path=None, set1=None, set2=None):
+    def __init__(self, model_path=None, word_list_path=None, curated_sets_path=None):
         if not TORCH_AVAILABLE:
             raise ImportError("PyTorch required. Install: pip install torch")
 
@@ -81,10 +110,28 @@ class DQNSolver:
         self.feedbacks = []
         self.turn = 0
 
-        self.set1 = list(set1) if set1 is not None else None
-        self.set2 = list(set2) if set2 is not None else None
-
         self.word_to_idx = {w: i for i, w in enumerate(self.all_words)}
+
+        # Curated opening sets loaded from disk for deployment/web use
+        self.set1 = None
+        self.set2 = None
+        self.set3 = None
+
+        if curated_sets_path is not None:
+            curated = load_curated_sets(curated_sets_path)
+
+            raw_set1 = curated.get("set1", [])
+            raw_set2 = curated.get("set2", [])
+            raw_set3 = curated.get("set3", [])
+
+            self.set1 = [w for w in raw_set1 if w in self.word_to_idx]
+            self.set2 = [w for w in raw_set2 if w in self.word_to_idx]
+            self.set3 = [w for w in raw_set3 if w in self.word_to_idx]
+
+            print(
+                f"Loaded curated sets from {curated_sets_path} "
+                f"(set1={len(self.set1)}, set2={len(self.set2)}, set3={len(self.set3)})"
+            )
 
         self.word_encodings = torch.tensor(
             encode_words_onehot(self.all_words), dtype=torch.float32
@@ -119,17 +166,14 @@ class DQNSolver:
         - later: unrestricted
         """
         if self.turn == 0 and self.set1:
-            allowed = [w for w in self.set1 if w in self.word_to_idx]
-            if allowed:
-                return allowed
+            return self.set1
 
         if self.turn == 1 and self.set2:
-            allowed = [w for w in self.set2 if w in set(self.remaining)]
+            remaining_set = set(self.remaining)
+            allowed = [w for w in self.set2 if w in remaining_set]
             if allowed:
                 return allowed
-            allowed = [w for w in self.set2 if w in self.word_to_idx]
-            if allowed:
-                return allowed
+            return self.set2
 
         return self.all_words
 
