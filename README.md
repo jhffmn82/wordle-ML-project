@@ -21,7 +21,7 @@ This project compares six algorithmic strategies for solving Wordle — spanning
 
 The central question: when does a more sophisticated method actually help, and when does understanding the problem structure matter more than model complexity?
 
-Results
+## Results
 
 Solver	Type	Win Rate	Avg Guesses	Speed
 
