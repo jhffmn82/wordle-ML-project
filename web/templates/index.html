@@ -1,258 +1,1144 @@
-"""
-Solver adapter — uniform interface between Flask API and Wordle solvers.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wordle ML — Heuristic vs. Machine Learning Solvers</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ================================================================
+   DESIGN TOKENS
+   ================================================================ */
+:root {
+  --bg:         #0f1114;
+  --bg-card:    #1a1d23;
+  --bg-tile:    #2a2d35;
+  --bg-hover:   #32363f;
+  --border:     #3a3e48;
+  --text:       #e8eaed;
+  --text-dim:   #8b8f98;
+  --text-muted: #5a5e68;
+  --accent:     #6aaa64;
+  --yellow:     #c9b458;
+  --gray-tile:  #3a3a3c;
+  --green:      #538d4e;
+  --green-glow: rgba(106, 170, 100, 0.15);
+  --yellow-glow:rgba(201, 180, 88, 0.12);
+  --font-body:  'Outfit', system-ui, sans-serif;
+  --font-mono:  'DM Mono', 'Menlo', monospace;
+  --radius:     8px;
+  --radius-lg:  14px;
+  --shadow:     0 4px 24px rgba(0,0,0,0.3);
+}
 
-Solver interface (from source):
-    solver.reset()                      — clear state for new game
-    solver.get_guess() -> str           — return next guess
-    solver.update(guess, feedback)      — feedback = list of ints: 2=green, 1=yellow, 0=gray
+/* ================================================================
+   RESET + BASE
+   ================================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-Design:
-    Solvers are created ONCE at startup (singletons) because some have expensive
-    __init__ (InfoGainSolver computes best opener ~28s, RolloutSolver loads cache).
-    Each API request calls reset() → replay history via update() → get_guess().
-"""
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
 
-import os
-import sys
-import copy
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+/* ================================================================
+   LAYOUT
+   ================================================================ */
+.app-shell { max-width: 900px; margin: 0 auto; padding: 0 20px; }
 
+/* NAV */
+.top-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 32px;
+}
+.top-nav .logo {
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.top-nav .logo .dot {
+  width: 8px; height: 8px;
+  background: var(--accent);
+  border-radius: 50%;
+  display: inline-block;
+}
+.nav-links { display: flex; gap: 6px; }
+.nav-links button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  font-weight: 500;
+  padding: 7px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.nav-links button:hover { color: var(--text); background: var(--bg-card); }
+.nav-links button.active {
+  color: var(--text);
+  background: var(--bg-card);
+  border-color: var(--border);
+}
 
-# ---------------------------------------------------------------------------
-# Word list
-# ---------------------------------------------------------------------------
+/* PAGES */
+.page { display: none; animation: fadeIn 0.3s ease; }
+.page.active { display: block; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
-def load_word_list():
-    from engine.wordle_env import load_word_list as _load
-    return _load()
+/* ================================================================
+   HOME PAGE
+   ================================================================ */
+.hero {
+  text-align: center;
+  padding: 50px 0 32px;
+}
 
-WORD_LIST = []
+/* Wordle tile header */
+.hero-tiles {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.hero-tile {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-body);
+  font-size: 2rem;
+  font-weight: 700;
+  color: #fff;
+  border-radius: 6px;
+  text-transform: uppercase;
+}
+.hero-tile.ht-gray   { background: var(--gray-tile); }
+.hero-tile.ht-yellow { background: var(--yellow); }
+.hero-tile.ht-green  { background: var(--green); }
 
-def _ensure_word_list():
-    global WORD_LIST
-    if not WORD_LIST:
-        WORD_LIST = load_word_list()
-    return WORD_LIST
+.hero h1 {
+  font-size: 2.8rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin-bottom: 20px;
+  text-transform: uppercase;
+}
+.hero .subtitle {
+  font-size: 1.02rem;
+  color: var(--text-dim);
+  max-width: 540px;
+  margin: 0 auto;
+  line-height: 1.7;
+}
 
+.home-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-top: 44px;
+  max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.home-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px 16px;
+  cursor: pointer;
+  transition: all 0.25s;
+  text-align: center;
+}
+.home-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow);
+  transform: translateY(-2px);
+}
+.home-card h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.home-card p {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
 
-# ---------------------------------------------------------------------------
-# Feedback helpers
-# ---------------------------------------------------------------------------
+.hero-stats {
+  margin-top: 40px;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+.hero-stats span {
+  margin: 0 6px;
+  color: var(--border);
+}
 
-def feedback_str_to_ints(fb_str):
-    """'ggyxx' -> [2, 2, 1, 0, 0]"""
-    return [{'g': 2, 'y': 1, 'x': 0}[c] for c in fb_str.lower()]
+/* ================================================================
+   WORDLE GRID (shared between Solver + Autoplay)
+   ================================================================ */
+.grid-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 24px 0;
+}
+.grid-row {
+  display: flex;
+  gap: 6px;
+}
+.grid-tile {
+  width: 58px;
+  height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-body);
+  font-size: 1.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  border-radius: 4px;
+  border: 2px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  transition: transform 0.15s, background 0.2s, border-color 0.2s;
+  user-select: none;
+}
+.grid-tile.filled {
+  border-color: var(--text-muted);
+}
+.grid-tile.clickable {
+  cursor: pointer;
+}
+.grid-tile.clickable:hover {
+  transform: scale(1.06);
+}
 
-def feedback_ints_to_str(fb_ints):
-    """[2, 2, 1, 0, 0] -> 'ggyxx'"""
-    return ''.join({2: 'g', 1: 'y', 0: 'x'}[i] for i in fb_ints)
+/* Feedback colors */
+.grid-tile.green  { background: var(--green);     border-color: var(--green);     }
+.grid-tile.yellow { background: var(--yellow);     border-color: var(--yellow);    }
+.grid-tile.gray   { background: var(--gray-tile);  border-color: var(--gray-tile); }
 
-def compute_feedback(guess, target):
-    from engine.wordle_env import get_feedback
-    return get_feedback(guess.lower(), target.lower())
+/* Reveal animation */
+.grid-tile.reveal {
+  animation: tileReveal 0.4s ease forwards;
+}
+@keyframes tileReveal {
+  0%   { transform: scaleY(1); }
+  50%  { transform: scaleY(0); }
+  100% { transform: scaleY(1); }
+}
 
+/* Pop animation for typing */
+.grid-tile.pop {
+  animation: tilePop 0.1s ease;
+}
+@keyframes tilePop {
+  50% { transform: scale(1.12); }
+}
 
-# ---------------------------------------------------------------------------
-# Solver registry — singletons created once at startup
-# ---------------------------------------------------------------------------
+/* ================================================================
+   SOLVER ASSISTANT PAGE
+   ================================================================ */
+.solver-page { max-width: 660px; margin: 0 auto; }
 
-SOLVERS = {}
-_initialized = False
+.solver-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+}
 
-def _try_load_solvers():
-    global _initialized
-    if _initialized:
-        return
-    _initialized = True
+.solver-select, .word-input {
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  padding: 10px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  outline: none;
+}
+.solver-select:focus, .word-input:focus {
+  border-color: var(--accent);
+}
+.word-input {
+  width: 130px;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0.15em;
+}
 
-    print("[adapter] Loading solvers (this may take a minute)...", flush=True)
+.btn {
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 10px 20px;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover { background: #7aba75; }
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn-secondary {
+  background: var(--bg-card);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
 
-    # ---- Frequency Heuristic ----
-    try:
-        from solvers.frequency_solver import FrequencySolver
-        SOLVERS["frequency"] = {
-            "name": "Frequency Heuristic",
-            "type": "Heuristic",
-            "instance": FrequencySolver(),
-        }
-        print("[adapter] ✓ Frequency Heuristic")
-    except Exception as e:
-        print(f"[adapter] ✗ Frequency: {e}")
+.solver-hint {
+  text-align: center;
+  margin-top: 16px;
+  padding: 14px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.92rem;
+}
+.solver-hint .label {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 4px;
+}
+.solver-hint .guess-word {
+  font-family: var(--font-mono);
+  font-size: 1.4rem;
+  font-weight: 500;
+  color: var(--accent);
+  letter-spacing: 0.2em;
+}
 
-    # ---- Information Gain / Minimax (~28s for opener computation) ----
-    try:
-        from solvers.infogain_solver import InfoGainSolver
-        SOLVERS["infogain"] = {
-            "name": "Information Gain (Minimax)",
-            "type": "Heuristic",
-            "instance": InfoGainSolver(),
-        }
-        print("[adapter] ✓ Information Gain")
-    except Exception as e:
-        print(f"[adapter] ✗ InfoGain: {e}")
+.instructions {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.6;
+  margin-top: 20px;
+}
 
-    # ---- Tabular Q-Learning (auto-loads q_table.pkl + curated_set3.pkl) ----
-    try:
-        from solvers.tabular_q_solver import TabularQSolver
-        q_path = os.path.join(PROJECT_ROOT, "models", "q_table.pkl")
-        SOLVERS["tabular_q"] = {
-            "name": "Tabular Q-Learning",
-            "type": "RL",
-            "instance": TabularQSolver(q_table_path=q_path),
-        }
-        print("[adapter] ✓ Tabular Q-Learning")
-    except Exception as e:
-        print(f"[adapter] ✗ Tabular Q: {e}")
+.error-msg {
+  text-align: center;
+  color: #e55;
+  font-size: 0.88rem;
+  margin-top: 10px;
+}
 
-    # ---- Rollout (POMDP) ----
-    try:
-        from solvers.rollout_solver import RolloutSolver
-        SOLVERS["rollout"] = {
-            "name": "Rollout (POMDP)",
-            "type": "RL / Planning",
-            "instance": RolloutSolver(top_k=10),
-        }
-        print("[adapter] ✓ Rollout (POMDP)")
-    except Exception as e:
-        print(f"[adapter] ✗ Rollout: {e}")
+/* ================================================================
+   AUTOPLAY PAGE
+   ================================================================ */
+.autoplay-page { max-width: 660px; margin: 0 auto; }
 
-    # ---- DQN v1 ----
-    try:
-        from solvers.dqn_solver import DQNSolver
-        v1_path = os.path.join(PROJECT_ROOT, "models", "dqn_model.pt")
-        if os.path.exists(v1_path):
-            SOLVERS["dqn_v1"] = {
-                "name": "DQN v1 (Pure)",
-                "type": "Deep RL",
-                "instance": DQNSolver(model_path=v1_path),
-            }
-            print("[adapter] ✓ DQN v1")
-    except Exception as e:
-        print(f"[adapter] ✗ DQN v1: {e}")
+.autoplay-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
 
-    # ---- DQN v2 ----
-    try:
-        from solvers.dqn_solver import DQNSolver
-        v2_path = os.path.join(PROJECT_ROOT, "models", "dqn_v2_model.pt")
-        if os.path.exists(v2_path):
-            SOLVERS["dqn_v2"] = {
-                "name": "DQN v2 (Reward Shaped)",
-                "type": "Deep RL",
-                "instance": DQNSolver(model_path=v2_path),
-            }
-            print("[adapter] ✓ DQN v2")
-    except Exception as e:
-        print(f"[adapter] ✗ DQN v2: {e}")
+.autoplay-result {
+  text-align: center;
+  margin-top: 16px;
+  font-size: 0.95rem;
+}
+.autoplay-result .win { color: var(--accent); font-weight: 600; }
+.autoplay-result .lose { color: #e55; font-weight: 600; }
+.autoplay-result .stats {
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  margin-top: 4px;
+}
 
-    loaded = len(SOLVERS)
-    print(f"[adapter] {loaded} solver(s) ready.", flush=True)
+/* ================================================================
+   ABOUT PAGE
+   ================================================================ */
+.about-page { max-width: 780px; margin: 0 auto; padding-bottom: 60px; }
 
+.about-page h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 32px 0 12px;
+  letter-spacing: -0.02em;
+}
+.about-page h2:first-child { margin-top: 0; }
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+.about-page p {
+  color: var(--text-dim);
+  line-height: 1.7;
+  margin-bottom: 14px;
+  font-size: 0.95rem;
+}
 
-ALL_SOLVER_INFO = [
-    {"id": "frequency",  "name": "Frequency Heuristic",       "type": "Heuristic"},
-    {"id": "infogain",   "name": "Information Gain (Minimax)", "type": "Heuristic"},
-    {"id": "tabular_q",  "name": "Tabular Q-Learning",        "type": "RL"},
-    {"id": "rollout",    "name": "Rollout (POMDP)",            "type": "RL / Planning"},
-    {"id": "dqn_v1",     "name": "DQN v1 (Pure)",             "type": "Deep RL"},
-    {"id": "dqn_v2",     "name": "DQN v2 (Reward Shaped)",    "type": "Deep RL"},
-]
+/* Performance table */
+.perf-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 20px 0 32px;
+  font-size: 0.88rem;
+}
+.perf-table th {
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.perf-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.perf-table tr:hover td {
+  background: var(--bg-card);
+}
+.perf-table .num {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+.perf-table .best {
+  color: var(--accent);
+  font-weight: 600;
+}
+.tag {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-tile);
+  color: var(--text-dim);
+}
+.tag.heuristic { background: rgba(106,170,100,0.15); color: var(--accent); }
+.tag.rl { background: var(--yellow-glow); color: var(--yellow); }
+.tag.deep { background: rgba(200,80,80,0.15); color: #e07070; }
 
+/* Chart area */
+.chart-container {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin: 20px 0;
+}
+.bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.bar-label {
+  width: 160px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  text-align: right;
+  flex-shrink: 0;
+}
+.bar-track {
+  flex: 1;
+  height: 28px;
+  background: var(--bg-tile);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+  display: flex;
+  align-items: center;
+  padding-left: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #fff;
+}
+.bar-fill.green-bar { background: var(--green); }
+.bar-fill.yellow-bar { background: var(--yellow); color: #1a1d23; }
+.bar-fill.red-bar { background: #c0504d; }
+.bar-fill.blue-bar { background: #5a8abf; }
 
-def list_solvers():
-    _try_load_solvers()
-    result = []
-    for s in ALL_SOLVER_INFO:
-        entry = dict(s)
-        entry["available"] = s["id"] in SOLVERS
-        result.append(entry)
-    return result
+/* References */
+.ref-list {
+  list-style: none;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+.ref-list li {
+  padding: 4px 0;
+  padding-left: 18px;
+  position: relative;
+}
+.ref-list li::before {
+  content: attr(data-num);
+  position: absolute;
+  left: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
 
+/* footer */
+.footer {
+  text-align: center;
+  padding: 40px 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  border-top: 1px solid var(--border);
+  margin-top: 40px;
+}
 
-def suggest_guess(solver_id, game_history):
-    """
-    Get solver's suggested next guess.
+/* ================================================================
+   RESPONSIVE
+   ================================================================ */
+@media (max-width: 600px) {
+  .hero h1 { font-size: 1.8rem; }
+  .hero-tile { width: 48px; height: 48px; font-size: 1.5rem; }
+  .home-cards { grid-template-columns: 1fr; max-width: 300px; }
+  .grid-tile { width: 48px; height: 48px; font-size: 1.3rem; }
+  .bar-label { width: 100px; font-size: 0.75rem; }
+  .nav-links button { padding: 6px 10px; font-size: 0.8rem; }
+  .perf-table { font-size: 0.78rem; }
+  .perf-table th, .perf-table td { padding: 8px 8px; }
+}
+</style>
+</head>
+<body>
+<div class="app-shell">
 
-    Args:
-        solver_id: key from SOLVERS
-        game_history: list of {"guess": str, "feedback": str} dicts
-                      feedback = 5 chars of g/y/x
-    Returns:
-        {"guess": str, "solver": str} or {"error": str}
-    """
-    _try_load_solvers()
+  <!-- ============================================================
+       TOP NAV
+       ============================================================ -->
+  <nav class="top-nav">
+    <div class="logo" onclick="navigate('home')">
+      <span class="dot"></span> Wordle ML
+    </div>
+    <div class="nav-links">
+      <button onclick="navigate('home')" data-page="home">Home</button>
+      <button onclick="navigate('solver')" data-page="solver">Solver</button>
+      <button onclick="navigate('autoplay')" data-page="autoplay">Autoplay</button>
+      <button onclick="navigate('about')" data-page="about">About</button>
+    </div>
+  </nav>
 
-    if solver_id not in SOLVERS:
-        return {"error": f"Solver '{solver_id}' not available."}
+  <!-- ============================================================
+       HOME
+       ============================================================ -->
+  <div id="page-home" class="page active">
+    <div class="hero">
+      <div class="hero-tiles">
+        <div class="hero-tile ht-gray">W</div>
+        <div class="hero-tile ht-yellow">O</div>
+        <div class="hero-tile ht-gray">R</div>
+        <div class="hero-tile ht-green">D</div>
+        <div class="hero-tile ht-gray">L</div>
+        <div class="hero-tile ht-green">E</div>
+      </div>
+      <h1>ML Project</h1>
+      <p class="subtitle">
+        A comparative study of heuristic and machine learning approaches to solving
+        Wordle. Six solvers — from simple letter frequency to deep reinforcement
+        learning — tested against the theoretical optimal.
+      </p>
+    </div>
+    <div class="home-cards">
+      <div class="home-card" onclick="navigate('solver')">
+        <h3>🎯 Solver Assistant</h3>
+        <p>Get help solving Wordle</p>
+      </div>
+      <div class="home-card" onclick="navigate('autoplay')">
+        <h3>▶️ Autoplay</h3>
+        <p>Watch a solver play</p>
+      </div>
+      <div class="home-card" onclick="navigate('about')">
+        <h3>📊 About</h3>
+        <p>Results &amp; methodology</p>
+      </div>
+    </div>
+    <div class="hero-stats">
+      6 Solvers <span>·</span> 2,983 Words <span>·</span> Optimal: 3.421 avg guesses
+    </div>
+  </div>
 
-    solver = SOLVERS[solver_id]["instance"]
-    solver.reset()
+  <!-- ============================================================
+       SOLVER ASSISTANT
+       ============================================================ -->
+  <div id="page-solver" class="page">
+    <div class="solver-page">
+      <div class="solver-controls">
+        <select id="solver-select" class="solver-select">
+          <option value="frequency">Frequency Heuristic</option>
+          <option value="infogain">Info Gain (Minimax)</option>
+          <option value="tabular_q">Tabular Q-Learning</option>
+          <option value="rollout" selected>Rollout (POMDP)</option>
+          <option value="dqn_v1">DQN v1 (Pure)</option>
+          <option value="dqn_v2">DQN v2 (Reward Shaped)</option>
+        </select>
+        <input type="text" id="solver-word-input" class="word-input" maxlength="5" placeholder="WORD" autocomplete="off" spellcheck="false">
+        <button class="btn btn-primary" onclick="solverSubmitWord()" id="solver-submit-btn">Enter</button>
+        <button class="btn btn-primary" onclick="solverGetSuggestion()" id="solver-suggest-btn">Suggest Guess</button>
+        <button class="btn btn-secondary" onclick="solverReset()">Reset</button>
+      </div>
 
-    # Replay history
-    for entry in game_history:
-        guess = entry["guess"].lower()
-        fb_ints = feedback_str_to_ints(entry["feedback"])
-        solver.update(guess, fb_ints)
+      <div class="grid-container" id="solver-grid"></div>
 
-    try:
-        guess = solver.get_guess()
-        return {"guess": guess.upper(), "solver": SOLVERS[solver_id]["name"]}
-    except Exception as e:
-        return {"error": f"Solver error: {str(e)}"}
+      <div class="solver-hint" id="solver-hint" style="display:none;">
+        <div class="label">Suggested next guess</div>
+        <div class="guess-word" id="solver-suggestion">—</div>
+      </div>
 
+      <div class="error-msg" id="solver-error"></div>
 
-def autoplay(solver_id, target):
-    """
-    Run a full game: solver vs target word.
+      <div class="instructions">
+        <strong>How to use:</strong> Type a 5-letter word and press Enter to fill the next row.
+        Then <strong>click each tile</strong> to set its color (gray → yellow → green) to match your Wordle feedback.
+        Click <strong>Suggest Guess</strong> to ask the solver what to play next.
+      </div>
+    </div>
+  </div>
 
-    Returns:
-        {"target", "solver", "turns": [{"guess", "feedback"}], "won", "num_guesses"}
-    """
-    _try_load_solvers()
-    _ensure_word_list()
+  <!-- ============================================================
+       AUTOPLAY
+       ============================================================ -->
+  <div id="page-autoplay" class="page">
+    <div class="autoplay-page">
+      <div class="autoplay-controls">
+        <select id="autoplay-solver" class="solver-select">
+          <option value="frequency">Frequency Heuristic</option>
+          <option value="infogain">Info Gain (Minimax)</option>
+          <option value="tabular_q">Tabular Q-Learning</option>
+          <option value="rollout" selected>Rollout (POMDP)</option>
+          <option value="dqn_v1">DQN v1 (Pure)</option>
+          <option value="dqn_v2">DQN v2 (Reward Shaped)</option>
+        </select>
+        <input type="text" id="autoplay-target" class="word-input" maxlength="5" placeholder="TARGET" autocomplete="off" spellcheck="false">
+        <button class="btn btn-primary" onclick="autoplayRun()" id="autoplay-go-btn">Play</button>
+        <button class="btn btn-secondary" onclick="autoplayRandom()">Random</button>
+        <button class="btn btn-secondary" onclick="autoplayReset()">Reset</button>
+      </div>
 
-    target = target.lower().strip()
-    if target not in WORD_LIST:
-        return {"error": f"'{target.upper()}' is not in the word list."}
+      <div class="grid-container" id="autoplay-grid"></div>
 
-    if solver_id not in SOLVERS:
-        return {"error": f"Solver '{solver_id}' not available."}
+      <div class="autoplay-result" id="autoplay-result"></div>
+      <div class="error-msg" id="autoplay-error"></div>
+    </div>
+  </div>
 
-    solver = SOLVERS[solver_id]["instance"]
-    solver.reset()
-    turns = []
+  <!-- ============================================================
+       ABOUT
+       ============================================================ -->
+  <div id="page-about" class="page">
+    <div class="about-page">
+      <h2>Project Overview</h2>
+      <p>
+        This project compares six algorithmic strategies for solving Wordle — spanning simple heuristics,
+        reinforcement learning, and deep RL — against the known optimal solution
+        (Bertsimas &amp; Paskov, 2024: 3.421 avg guesses, 100% win rate).
+      </p>
+      <p>
+        The central finding: Wordle's effective state space is just <strong>431 unique game states</strong>
+        across all 2,983 possible target words. This makes it trivially solvable by dynamic programming
+        but paradoxically intractable for deep RL's exploration-based learning. A 543K-parameter DQN
+        was the worst performer; a 431-entry lookup table was the best.
+      </p>
 
-    for turn in range(6):
-        try:
-            guess = solver.get_guess().lower()
-        except Exception as e:
-            return {"error": f"Solver crashed on turn {turn+1}: {str(e)}"}
+      <h2>Performance Comparison</h2>
+      <table class="perf-table">
+        <thead>
+          <tr>
+            <th>Solver</th>
+            <th>Type</th>
+            <th>Win Rate</th>
+            <th>Avg Guesses</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Optimal (Bertsimas 2024)</td>
+            <td><span class="tag">Benchmark</span></td>
+            <td class="num best">100.0%</td>
+            <td class="num best">3.421</td>
+          </tr>
+          <tr>
+            <td>Rollout (POMDP)</td>
+            <td><span class="tag rl">RL / Planning</span></td>
+            <td class="num best">100.0%</td>
+            <td class="num best">3.568</td>
+          </tr>
+          <tr>
+            <td>Frequency Heuristic</td>
+            <td><span class="tag heuristic">Heuristic</span></td>
+            <td class="num">99.8%</td>
+            <td class="num">3.707</td>
+          </tr>
+          <tr>
+            <td>Info Gain (Minimax)</td>
+            <td><span class="tag heuristic">Heuristic</span></td>
+            <td class="num best">100.0%</td>
+            <td class="num">3.728</td>
+          </tr>
+          <tr>
+            <td>Tabular Q-Learning</td>
+            <td><span class="tag rl">RL</span></td>
+            <td class="num">98.4%</td>
+            <td class="num">3.812</td>
+          </tr>
+          <tr>
+            <td>DQN v1 (Pure)</td>
+            <td><span class="tag deep">Deep RL</span></td>
+            <td class="num">64.4%</td>
+            <td class="num">4.536</td>
+          </tr>
+          <tr>
+            <td>DQN v2 (Reward Shaped)</td>
+            <td><span class="tag deep">Deep RL</span></td>
+            <td class="num" style="color:var(--text-muted)">TBD</td>
+            <td class="num" style="color:var(--text-muted)">TBD</td>
+          </tr>
+        </tbody>
+      </table>
 
-        fb_ints = compute_feedback(guess, target)
-        fb_str = feedback_ints_to_str(fb_ints)
-        solver.update(guess, fb_ints)
+      <h2>Average Guesses</h2>
+      <div class="chart-container">
+        <div class="bar-chart" id="guesses-chart"></div>
+      </div>
 
-        turns.append({"guess": guess.upper(), "feedback": fb_str})
+      <h2>Win Rate</h2>
+      <div class="chart-container">
+        <div class="bar-chart" id="winrate-chart"></div>
+      </div>
 
-        if fb_ints == [2, 2, 2, 2, 2]:
-            return {
-                "target": target.upper(),
-                "solver": SOLVERS[solver_id]["name"],
-                "turns": turns,
-                "won": True,
-                "num_guesses": turn + 1,
-            }
+      <h2>Why DQN Fails at Wordle</h2>
+      <p>
+        Pure DQN cannot learn Wordle effectively. As epsilon decays, the model's poor guesses generate
+        bad replay data, which further degrades training — a distribution shift death spiral. The best
+        honest evaluation achieved just 64.4% win rate, compared to 98.5% for randomly picking from
+        remaining valid words.
+      </p>
+      <p>
+        DQN v2 attempts to fix this by using the rollout solver as a live teacher during training:
+        exploration follows the rollout's optimal move, with a +20 reward bonus for matching. Epsilon
+        decays from 0.9 to 0.4, maintaining at least 40% teacher guidance throughout training.
+      </p>
 
-    return {
-        "target": target.upper(),
-        "solver": SOLVERS[solver_id]["name"],
-        "turns": turns,
-        "won": False,
-        "num_guesses": 6,
+      <h2>Architecture Details</h2>
+      <p>
+        <strong>DQN:</strong> 417-dim state → 512 → 512 → 130-dim output. Output dot-producted with
+        one-hot word encodings (2983 × 130) to score each word. No remaining-word mask — the model
+        picks from all 2,983 words.
+      </p>
+      <p>
+        <strong>Rollout solver:</strong> Memoized POMDP rollout. Only 431 unique game states exist across
+        all target words. Cache built in ~15 minutes. Key = tuple of (guess, feedback) pairs.
+      </p>
+      <p>
+        <strong>Frequency heuristic:</strong> Scores candidates by letter frequency × 3× positional frequency.
+        Simple but effective at 99.8% win rate.
+      </p>
+
+      <h2>References</h2>
+      <ul class="ref-list">
+        <li data-num="1.">Bertsimas, D. &amp; Paskov, A. (2024). An Exact and Interpretable Solution to Wordle. <em>Operations Research</em>.</li>
+        <li data-num="2.">Bhambri, S. et al. (2022). RL Methods for Wordle: A POMDP/Adaptive Control Approach. arXiv:2211.10298.</li>
+        <li data-num="3.">Anderson, B.J. &amp; Meyer, J.G. (2022). Finding the optimal human strategy for Wordle. arXiv:2202.00557.</li>
+        <li data-num="4.">Liu, C.-L. (2022). Using Wordle for Learning to Design and Compare Strategies. IEEE CoG.</li>
+        <li data-num="5.">Ho, A. (2022). Wordle Solving with Deep Reinforcement Learning.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="footer">
+    Wordle ML Project — Graduate ML, 2025
+  </div>
+</div>
+
+<!-- ================================================================
+     JAVASCRIPT
+     ================================================================ -->
+<script>
+// =====================================================================
+// NAVIGATION
+// =====================================================================
+function navigate(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-links button').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  const navBtn = document.querySelector(`[data-page="${page}"]`);
+  if (navBtn) navBtn.classList.add('active');
+  window.location.hash = page;
+}
+
+// Restore from hash
+window.addEventListener('DOMContentLoaded', () => {
+  const hash = window.location.hash.replace('#', '') || 'home';
+  navigate(hash);
+  buildSolverGrid();
+  buildAutoplayGrid();
+  buildCharts();
+});
+
+// =====================================================================
+// SOLVER ASSISTANT
+// =====================================================================
+const SOLVER_STATE = {
+  currentRow: 0,
+  history: [],  // [{guess, feedback}]
+  grid: [],     // 6 rows x 5 cols of {letter, color}
+};
+
+function buildSolverGrid() {
+  const container = document.getElementById('solver-grid');
+  container.innerHTML = '';
+  SOLVER_STATE.grid = [];
+  for (let r = 0; r < 6; r++) {
+    const row = [];
+    const rowDiv = document.createElement('div');
+    rowDiv.className = 'grid-row';
+    for (let c = 0; c < 5; c++) {
+      const tile = document.createElement('div');
+      tile.className = 'grid-tile';
+      tile.dataset.row = r;
+      tile.dataset.col = c;
+      tile.addEventListener('click', () => solverTileClick(r, c));
+      rowDiv.appendChild(tile);
+      row.push({ letter: '', color: 'empty' });
     }
+    container.appendChild(rowDiv);
+    SOLVER_STATE.grid.push(row);
+  }
+}
+
+function solverTileClick(r, c) {
+  // Only allow clicking on filled, committed rows (not current row)
+  if (r >= SOLVER_STATE.currentRow) return;
+  const cell = SOLVER_STATE.grid[r][c];
+  // Cycle: gray → yellow → green
+  const cycle = { gray: 'yellow', yellow: 'green', green: 'gray' };
+  cell.color = cycle[cell.color] || 'gray';
+  // Update history
+  SOLVER_STATE.history[r].feedback = SOLVER_STATE.grid[r].map(c => {
+    return c.color === 'green' ? 'g' : c.color === 'yellow' ? 'y' : 'x';
+  }).join('');
+  renderSolverGrid();
+}
+
+function renderSolverGrid() {
+  const container = document.getElementById('solver-grid');
+  const rows = container.querySelectorAll('.grid-row');
+  for (let r = 0; r < 6; r++) {
+    const tiles = rows[r].querySelectorAll('.grid-tile');
+    for (let c = 0; c < 5; c++) {
+      const cell = SOLVER_STATE.grid[r][c];
+      const tile = tiles[c];
+      tile.textContent = cell.letter;
+      tile.className = 'grid-tile';
+      if (cell.letter) tile.classList.add('filled');
+      if (cell.color !== 'empty') tile.classList.add(cell.color);
+      if (r < SOLVER_STATE.currentRow) tile.classList.add('clickable');
+    }
+  }
+}
+
+function solverSubmitWord() {
+  const input = document.getElementById('solver-word-input');
+  const word = input.value.trim().toUpperCase();
+  if (word.length !== 5) {
+    showError('solver-error', 'Enter a 5-letter word.');
+    return;
+  }
+  if (SOLVER_STATE.currentRow >= 6) {
+    showError('solver-error', 'All 6 rows used. Reset to start over.');
+    return;
+  }
+
+  const r = SOLVER_STATE.currentRow;
+  for (let c = 0; c < 5; c++) {
+    SOLVER_STATE.grid[r][c] = { letter: word[c], color: 'gray' };
+  }
+  SOLVER_STATE.history.push({ guess: word.toLowerCase(), feedback: 'xxxxx' });
+  SOLVER_STATE.currentRow++;
+  input.value = '';
+  clearError('solver-error');
+  renderSolverGrid();
+}
+
+async function solverGetSuggestion() {
+  if (SOLVER_STATE.currentRow === 0) {
+    // No history yet — ask for first guess
+  }
+  const solverId = document.getElementById('solver-select').value;
+  const btn = document.getElementById('solver-suggest-btn');
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  try {
+    const resp = await fetch('/api/suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        solver: solverId,
+        history: SOLVER_STATE.history,
+      }),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      showError('solver-error', data.error);
+    } else {
+      clearError('solver-error');
+      document.getElementById('solver-hint').style.display = 'block';
+      document.getElementById('solver-suggestion').textContent = data.guess;
+    }
+  } catch (e) {
+    showError('solver-error', 'Could not reach server. Are solvers deployed?');
+  }
+  btn.disabled = false;
+  btn.textContent = 'Suggest Guess';
+}
+
+function solverReset() {
+  SOLVER_STATE.currentRow = 0;
+  SOLVER_STATE.history = [];
+  buildSolverGrid();
+  document.getElementById('solver-hint').style.display = 'none';
+  clearError('solver-error');
+}
+
+// Keyboard support for solver word input
+document.addEventListener('keydown', (e) => {
+  if (!document.getElementById('page-solver').classList.contains('active')) return;
+  if (e.key === 'Enter') {
+    const input = document.getElementById('solver-word-input');
+    if (document.activeElement === input || input.value.length > 0) {
+      solverSubmitWord();
+    }
+  }
+});
+
+// =====================================================================
+// AUTOPLAY
+// =====================================================================
+const AUTOPLAY_STATE = {
+  grid: [],
+  animating: false,
+};
+
+function buildAutoplayGrid() {
+  const container = document.getElementById('autoplay-grid');
+  container.innerHTML = '';
+  AUTOPLAY_STATE.grid = [];
+  for (let r = 0; r < 6; r++) {
+    const row = [];
+    const rowDiv = document.createElement('div');
+    rowDiv.className = 'grid-row';
+    for (let c = 0; c < 5; c++) {
+      const tile = document.createElement('div');
+      tile.className = 'grid-tile';
+      rowDiv.appendChild(tile);
+      row.push({ letter: '', color: 'empty' });
+    }
+    container.appendChild(rowDiv);
+    AUTOPLAY_STATE.grid.push(row);
+  }
+}
+
+async function autoplayRandom() {
+  try {
+    const resp = await fetch('/api/words/random');
+    const data = await resp.json();
+    if (data.word) {
+      document.getElementById('autoplay-target').value = data.word;
+    }
+  } catch (e) {
+    showError('autoplay-error', 'Could not reach server.');
+  }
+}
+
+async function autoplayRun() {
+  if (AUTOPLAY_STATE.animating) return;
+  const target = document.getElementById('autoplay-target').value.trim().toUpperCase();
+  const solverId = document.getElementById('autoplay-solver').value;
+
+  if (target.length !== 5) {
+    showError('autoplay-error', 'Enter a 5-letter target word.');
+    return;
+  }
+
+  autoplayReset();
+  clearError('autoplay-error');
+  AUTOPLAY_STATE.animating = true;
+  document.getElementById('autoplay-go-btn').disabled = true;
+
+  try {
+    const resp = await fetch('/api/autoplay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ solver: solverId, target: target.toLowerCase() }),
+    });
+    const data = await resp.json();
+
+    if (data.error) {
+      showError('autoplay-error', data.error);
+      AUTOPLAY_STATE.animating = false;
+      document.getElementById('autoplay-go-btn').disabled = false;
+      return;
+    }
+
+    // Animate turns
+    for (let t = 0; t < data.turns.length; t++) {
+      await animateAutoplayRow(t, data.turns[t]);
+      await sleep(200);
+    }
+
+    // Show result
+    const resultDiv = document.getElementById('autoplay-result');
+    if (data.won) {
+      resultDiv.innerHTML = `<span class="win">Solved in ${data.num_guesses} guess${data.num_guesses > 1 ? 'es' : ''}!</span>
+        <div class="stats">Target: ${data.target} · Solver: ${data.solver}</div>`;
+    } else {
+      resultDiv.innerHTML = `<span class="lose">Failed to solve.</span>
+        <div class="stats">Target: ${data.target} · Solver: ${data.solver}</div>`;
+    }
+  } catch (e) {
+    showError('autoplay-error', 'Could not reach server. Are solvers deployed?');
+  }
+
+  AUTOPLAY_STATE.animating = false;
+  document.getElementById('autoplay-go-btn').disabled = false;
+}
+
+async function animateAutoplayRow(rowIdx, turn) {
+  const container = document.getElementById('autoplay-grid');
+  const rowDiv = container.querySelectorAll('.grid-row')[rowIdx];
+  const tiles = rowDiv.querySelectorAll('.grid-tile');
+  const colorMap = { g: 'green', y: 'yellow', x: 'gray' };
+
+  // Fill letters with pop
+  for (let c = 0; c < 5; c++) {
+    tiles[c].textContent = turn.guess[c];
+    tiles[c].classList.add('filled', 'pop');
+    await sleep(60);
+  }
+  await sleep(200);
+
+  // Reveal colors one by one
+  for (let c = 0; c < 5; c++) {
+    tiles[c].classList.add('reveal');
+    await sleep(200);
+    tiles[c].classList.add(colorMap[turn.feedback[c]]);
+  }
+}
+
+function autoplayReset() {
+  buildAutoplayGrid();
+  document.getElementById('autoplay-result').innerHTML = '';
+  clearError('autoplay-error');
+}
+
+// =====================================================================
+// ABOUT PAGE CHARTS
+// =====================================================================
+function buildCharts() {
+  const solvers = [
+    { name: 'Optimal (Bertsimas)',  avg: 3.421, win: 100.0, bar: 'green-bar' },
+    { name: 'Rollout (POMDP)',      avg: 3.568, win: 100.0, bar: 'green-bar' },
+    { name: 'Frequency Heuristic',  avg: 3.707, win: 99.8,  bar: 'green-bar' },
+    { name: 'Info Gain (Minimax)',   avg: 3.728, win: 100.0, bar: 'green-bar' },
+    { name: 'Tabular Q-Learning',   avg: 3.812, win: 98.4,  bar: 'yellow-bar' },
+    { name: 'DQN v1 (Pure)',        avg: 4.536, win: 64.4,  bar: 'red-bar' },
+  ];
+
+  // Avg guesses chart (scale: 3.0 to 5.0)
+  const guessChart = document.getElementById('guesses-chart');
+  guessChart.innerHTML = '';
+  for (const s of solvers) {
+    const pct = ((s.avg - 3.0) / (5.0 - 3.0)) * 100;
+    guessChart.innerHTML += `
+      <div class="bar-row">
+        <div class="bar-label">${s.name}</div>
+        <div class="bar-track">
+          <div class="bar-fill ${s.bar}" style="width: ${Math.min(pct, 100)}%">${s.avg}</div>
+        </div>
+      </div>`;
+  }
+
+  // Win rate chart
+  const winChart = document.getElementById('winrate-chart');
+  winChart.innerHTML = '';
+  for (const s of solvers) {
+    winChart.innerHTML += `
+      <div class="bar-row">
+        <div class="bar-label">${s.name}</div>
+        <div class="bar-track">
+          <div class="bar-fill ${s.bar}" style="width: ${s.win}%">${s.win}%</div>
+        </div>
+      </div>`;
+  }
+}
+
+// =====================================================================
+// UTILITIES
+// =====================================================================
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function showError(id, msg) {
+  document.getElementById(id).textContent = msg;
+}
+function clearError(id) {
+  document.getElementById(id).textContent = '';
+}
+</script>
+</body>
+</html>
