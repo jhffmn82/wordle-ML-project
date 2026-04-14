@@ -1,13 +1,3 @@
----
-title: Wordle ML
-emoji: 🟩
-colorFrom: green
-colorTo: gray
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # Wordle ML: Comparing Heuristics and Machine Learning for Wordle Solving
 
 **Justin Hoffman** UIUC MCS / ISU MSCS Graduate Student
