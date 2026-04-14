@@ -590,8 +590,8 @@ a:hover { text-decoration: underline; }
       <h1>ML Project</h1>
       <p class="subtitle">
         A comparative study of heuristic and machine learning approaches to solving
-        Wordle. Six solvers — from simple letter frequency to deep reinforcement
-        learning — tested against the theoretical optimal.
+        Wordle. Six solvers, from simple letter frequency to deep reinforcement
+        learning, tested against the theoretical optimal.
       </p>
     </div>
     <div class="home-cards">
@@ -608,7 +608,7 @@ a:hover { text-decoration: underline; }
         <p>Results &amp; methodology</p>
       </div>
     </div>
-    <div class="hero-stats">
+    <div class="hero-stats" style="text-align: center;">
       6 Solvers <span>·</span> 2,315 Words <span>·</span> Optimal: 3.421 avg guesses
     </div>
   </div>
@@ -683,15 +683,15 @@ a:hover { text-decoration: underline; }
     <div class="about-page">
       <h2>Author</h2>
       <p>
-        <strong>Justin Hoffman</strong> — UIUC MCS / ISU MSCS Graduate Student.
-        This project was developed for IT 448 (Graduate Machine Learning) at Illinois State University, Spring 2025.
+        <strong>Justin Hoffman</strong>, UIUC MCS / ISU MSCS Graduate Student.
+        This project was developed for IT 448 (Graduate Machine Learning) at Illinois State University, Spring 2026.
       </p>
 
       <h2>Inspiration</h2>
       <p>
         In 2022, I built a Python-based Wordle solver ("Wordmaster Master") in response to a challenge
-        from a coworker. That original solver used simple frequency analysis — scoring candidate words
-        by how commonly their letters appeared — and was wrapped in a tkinter GUI. I wrote it before
+        from a coworker. That original solver used simple frequency analysis, scoring candidate words
+        by how commonly their letters appeared, and was wrapped in a tkinter GUI. I wrote it before
         I had any formal introduction to information gain or decision trees, which made it a natural
         baseline when I later revisited the problem with machine learning.
       </p>
@@ -699,7 +699,7 @@ a:hover { text-decoration: underline; }
         I was also heavily inspired by
         <a href="https://andrewkho.github.io/wordle-solver/" target="_blank">Andrew Ho's <em>"Wordle Solving with Deep Reinforcement Learning"</em></a>,
         which frames Wordle as an RL problem and describes the practical design choices needed to make
-        DQN training feasible — including the 130-dim output dot-producted with one-hot word encodings,
+        DQN training feasible, including the 130-dim output dot-producted with one-hot word encodings,
         staged warm-start training, and the 417-dim state representation.
         My DQN implementation borrows this architecture directly. Ho reported ~98% win rate with
         ~4.1 average guesses on a larger ~13K word vocabulary.
@@ -707,8 +707,8 @@ a:hover { text-decoration: underline; }
 
       <h2>Project Overview</h2>
       <p>
-        This project compares six algorithmic strategies for solving Wordle — spanning simple heuristics,
-        reinforcement learning, and deep RL — against the known optimal solution
+        This project compares six algorithmic strategies for solving Wordle, spanning simple heuristics,
+        reinforcement learning, and deep RL, against the known optimal solution
         (Bertsimas &amp; Paskov, 2024: 3.421 avg guesses, 100% win rate). All solvers are evaluated against
         the official Wordle answer list of 2,315 words.
       </p>
@@ -725,7 +725,7 @@ a:hover { text-decoration: underline; }
       <p>
         <strong>2. Information Gain (Minimax)</strong> <span class="tag heuristic">Heuristic</span><br>
         For each candidate guess, simulates the feedback it would produce against every remaining word.
-        Groups words by feedback pattern — words producing identical colored tiles form a partition.
+        Groups words by feedback pattern, words producing identical colored tiles form a partition.
         Picks the guess that minimizes the worst-case (largest) partition. The opening guess is computed
         once and cached since the starting state is always the same.
       </p>
@@ -737,7 +737,7 @@ a:hover { text-decoration: underline; }
         dot-producted with one-hot word encodings (2,315 &times; 130) to score all words. Trained for 18,000
         episodes with a 4-tier curated exploration curriculum (25 &rarr; 85 &rarr; 1,176 &rarr; 2,315 words).
         Epsilon decays to 0 in the final phase, revealing the model's true learned performance.
-        The result: training collapses due to distribution shift — the model's poor guesses generate
+        The result: training collapses due to distribution shift, the model's poor guesses generate
         bad replay data which further degrades training. Honest evaluation: 67.2% win rate.
       </p>
       <p>
@@ -745,13 +745,13 @@ a:hover { text-decoration: underline; }
         Same architecture as v1, but trained with the rollout solver as a live teacher using Double DQN.
         Exploration follows the teacher's optimal move with a +20 reward bonus for imitation. Epsilon
         decays from 0.9 to 0.4, always maintaining &ge;40% teacher guidance. The result: <strong>97.7% win
-        rate with 3.678 avg guesses</strong> — surpassing Ho's reported ~4.1 avg guesses by approximately
+        rate with 3.678 avg guesses</strong>, surpassing Ho's reported ~4.1 avg guesses by approximately
         0.4 guesses per game. The key insight: learning from a near-optimal teacher is far more
         effective than learning from random exploration.
       </p>
       <p>
         <strong>5. Tabular Q-Learning</strong> <span class="tag rl">RL</span><br>
-        Following Anderson &amp; Meyer (2022), this solver doesn't pick words directly — it learns which
+        Following Anderson &amp; Meyer (2022), this solver doesn't pick words directly, it learns which
         of 5 heuristic <em>strategies</em> to apply at each game state. State = (# greens, # yellows) from
         the last guess; action = choice of strategy (random, curated list, frequency, smart filter,
         exclude-only). Only ~19 reachable states make a full Q-table feasible. Trained for 10,000 episodes.
@@ -762,7 +762,7 @@ a:hover { text-decoration: underline; }
         policy improvement. For the top 10 candidates (scored by frequency or minimax), it simulates
         the complete game forward for every remaining word using the frequency solver as base heuristic,
         then picks the candidate with the lowest average total guesses. The game tree has only a
-        few hundred unique reachable states — once the cache is built, evaluation is instant.
+        few hundred unique reachable states, once the cache is built, evaluation is instant.
       </p>
 
       <h2>Performance Comparison</h2>
@@ -782,7 +782,7 @@ a:hover { text-decoration: underline; }
             <td><span class="tag">Benchmark</span></td>
             <td class="num best">100.0%</td>
             <td class="num best">3.421</td>
-            <td class="num">—</td>
+            <td class="num"> </td>
           </tr>
           <tr>
             <td>Rollout (POMDP)</td>
@@ -846,16 +846,16 @@ a:hover { text-decoration: underline; }
         <div class="bar-chart" id="winrate-chart"></div>
       </div>
 
-      <h2>Why DQN v1 Fails — and How v2 Recovers</h2>
+      <h2>Why DQN v1 Fails, and How v2 Recovers</h2>
       <p>
         Pure DQN cannot learn Wordle through trial and error. As epsilon decays, the model's poor guesses generate
-        bad replay data, which further degrades training — a distribution shift death spiral. DQN v1's honest
+        bad replay data, which further degrades training, a distribution shift death spiral. DQN v1's honest
         evaluation: just 67.2% win rate, far worse than randomly picking from remaining valid words.
       </p>
       <p>
         DQN v2 fixes this by replacing random exploration with teacher-guided exploration from the rollout solver.
         Combined with Double DQN for training stability and a +20 reward bonus for matching the teacher's moves,
-        v2 achieves 97.7% win rate with 3.678 avg guesses — surpassing Ho's reported ~4.1 average by ~0.4 guesses
+        v2 achieves 97.7% win rate with 3.678 avg guesses, surpassing Ho's reported ~4.1 average by ~0.4 guesses
         per game. However, note that Ho evaluated on ~13K words while we use the 2,315-word official answer list,
         giving our DQN a smaller and more tractable action space.
       </p>
@@ -863,7 +863,7 @@ a:hover { text-decoration: underline; }
       <h2>Key Findings</h2>
       <p>
         <strong>Simple heuristics remain remarkably competitive.</strong> My original 2022 frequency
-        solver — written before I knew what information gain was — achieved 100% win rate at 3.575
+        solver, written before I knew what information gain was, achieved 100% win rate at 3.575
         avg guesses, beating every ML approach. The prediction from my project proposal held:
         <em>"I predict any learned approach will not outperform my heuristic approaches."</em>
       </p>
@@ -871,7 +871,7 @@ a:hover { text-decoration: underline; }
         <strong>Problem structure matters more than model complexity.</strong> The rollout solver (a
         cached lookup table) achieved the best non-optimal performance at 3.477 avg guesses. Understanding
         that Wordle's game tree has only a few hundred unique reachable states makes it trivially solvable
-        by dynamic programming — but this structural insight is invisible to a neural network trying to
+        by dynamic programming, but this structural insight is invisible to a neural network trying to
         learn from scratch.
       </p>
 
@@ -904,7 +904,7 @@ a:hover { text-decoration: underline; }
   </div>
 
   <div class="footer">
-    Justin Hoffman — UIUC MCS / ISU MSCS Graduate Student — 4/13/2026<br>
+    Justin Hoffman, UIUC MCS / ISU MSCS Graduate Student, 4/13/2026<br>
     <a href="https://github.com/jhffmn82/wordle-ML-project" target="_blank">github.com/jhffmn82/wordle-ML-project</a>
   </div>
 </div>
@@ -1020,7 +1020,7 @@ function solverSubmitWord() {
 
 async function solverGetSuggestion() {
   if (SOLVER_STATE.currentRow === 0) {
-    // No history yet — ask for first guess
+    // No history yet, ask for first guess
   }
   const solverId = document.getElementById('solver-select').value;
   const btn = document.getElementById('solver-suggest-btn');
