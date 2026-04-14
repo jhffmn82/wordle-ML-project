@@ -8,16 +8,16 @@ app_port: 7860
 pinned: false
 ---
 
-# Wordle ML — Comparing Heuristics and Machine Learning for Wordle Solving
+# Wordle ML: Comparing Heuristics and Machine Learning for Wordle Solving
 
 **Justin Hoffman** UIUC MCS / ISU MSCS Graduate Student
-IT 448 (Graduate Machine Learning) — Illinois State University, Spring 2025
+IT 448 (Graduate Machine Learning), Illinois State University, Spring 2026
 
 [🌐 Live Demo](https://jhffmn82-wordle-ml.hf.space) · [📓 Evaluation Notebook](notebooks/evaluation.ipynb)
 
 ## Overview
 
-This project compares six algorithmic strategies for solving Wordle — spanning classical heuristics, reinforcement learning, and deep RL — against the provably optimal solution (Bertsimas & Paskov, 2024). All solvers are evaluated against the official Wordle answer list of 2,315 words.
+This project compares six algorithmic strategies for solving Wordle, spanning classical heuristics, reinforcement learning, and deep RL, against the provably optimal solution (Bertsimas & Paskov, 2024). All solvers are evaluated against the official Wordle answer list of 2,315 words.
 
 The central question: when does a more sophisticated method actually help, and when does understanding the problem structure matter more than model complexity?
 
@@ -43,27 +43,27 @@ Ho (2022) reported	Deep RL	~98%	~4.1	—
 
 ## Key Findings
 
-DQN v2 surpassed Ho's reported deep RL results — 3.678 avg guesses vs Ho's ~4.1, using teacher-guided exploration from the rollout solver and Double DQN.
+DQN v2 surpassed Ho's reported deep RL results, 3.678 avg guesses vs Ho's ~4.1, using teacher-guided exploration from the rollout solver and Double DQN.
 
-Pure DQN fails catastrophically — DQN v1 achieved only 67.2% win rate due to distribution shift during training.
+Pure DQN fails catastrophically, DQN v1 achieved only 67.2% win rate due to distribution shift during training.
 
-Simple heuristics remain remarkably competitive — my original 2022 frequency solver achieved 100% win rate at 3.575 avg guesses, beating every ML approach.
+Simple heuristics remain remarkably competitive, my original 2022 frequency solver achieved 100% win rate at 3.575 avg guesses, beating every ML approach.
 
-Problem structure matters more than model complexity — the rollout solver (a cached lookup table) achieved the best non-optimal performance. Wordle's game tree has only a few hundred unique reachable states.
+Problem structure matters more than model complexity, the rollout solver (a cached lookup table) achieved the best non-optimal performance. Wordle's game tree has only a few hundred unique reachable states.
 
 ## The Solvers
 
-1. Frequency Heuristic — My original 2022 solver. Scores words by letter frequency weighted 3× for positional frequency. 100% win rate, 3.575 avg guesses.
+1. Frequency Heuristic: My original 2022 solver. Scores words by letter frequency weighted 3× for positional frequency. 100% win rate, 3.575 avg guesses.
 
-2. Information Gain (Minimax) — Picks the guess that minimizes the worst-case partition of remaining words. 100% win rate, 3.644 avg guesses.
+2. Information Gain (Minimax): Picks the guess that minimizes the worst-case partition of remaining words. 100% win rate, 3.644 avg guesses.
 
-3. DQN v1 (Pure) — Deep Q-Network following Ho (2022): 417→512→512→130 architecture with 4-tier curated exploration curriculum. Training collapses due to distribution shift. 67.2% win rate.
+3. DQN v1 (Pure): Deep Q-Network following Ho (2022): 417→512→512→130 architecture with 4-tier curated exploration curriculum. Training collapses due to distribution shift. 67.2% win rate.
 
-4. DQN v2 (Teacher-Guided) — Same architecture, trained with the rollout solver as a live teacher using Double DQN. +20 reward bonus for matching teacher moves. 97.7% win rate, 3.678 avg guesses.
+4. DQN v2 (Teacher-Guided): Same architecture, trained with the rollout solver as a live teacher using Double DQN. +20 reward bonus for matching teacher moves. 97.7% win rate, 3.678 avg guesses.
 
-5. Tabular Q-Learning — Following Anderson & Meyer (2022). Learns which of 5 heuristic strategies to use at each game state. Only ~19 reachable states. 99.0% win rate.
+5. Tabular Q-Learning: Following Anderson & Meyer (2022). Learns which of 5 heuristic strategies to use at each game state. Only ~19 reachable states. 99.0% win rate.
 
-6. Rollout (POMDP) — Following Bhambri et al. (2022). One-step lookahead policy improvement over the frequency heuristic. Memoized cache covers the full game tree. 100% win rate, 3.477 avg guesses.
+6. Rollout (POMDP): Following Bhambri et al. (2022). One-step lookahead policy improvement over the frequency heuristic. Memoized cache covers the full game tree. 100% win rate, 3.477 avg guesses.
 
 ## Project Structure
 
@@ -96,11 +96,11 @@ wordle-ML-project/
 
 The live demo has three modes:
 
-Solver Assistant — Play Wordle with AI help. Enter guesses, click tiles to set feedback colors, and get suggestions from any of the 6 solvers.
+Solver Assistant: Play Wordle with AI help. Enter guesses, click tiles to set feedback colors, and get suggestions from any of the 6 solvers.
 
-Autoplay — Enter a target word and watch a solver play the game step by step with animated tile reveals.
+Autoplay: Enter a target word and watch a solver play the game step by step with animated tile reveals.
 
-About — Full results, methodology, solver descriptions, and charts.
+About: Full results, methodology, solver descriptions, and charts.
 
 Hosted on Hugging Face Spaces via Docker.
 
