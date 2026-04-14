@@ -183,4 +183,4 @@ def autoplay(solver_id, target):
         fb_str = feedback_ints_to_str(fb_ints)
         solver.update(guess, fb_ints)
 
-        turns.app
+        turns.append({"guess": guess.upper(), "feedback": fb_str})
