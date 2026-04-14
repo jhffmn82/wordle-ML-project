@@ -45,9 +45,9 @@ def api_autoplay():
 
 @app.route("/api/words/random")
 def api_random_word():
-    _ensure_word_list()
-    if WORD_LIST:
-        return jsonify({"word": random.choice(WORD_LIST).upper()})
+    words = _ensure_word_list()
+    if words:
+        return jsonify({"word": random.choice(words).upper()})
     return jsonify({"error": "Word list not loaded"}), 500
 
 
