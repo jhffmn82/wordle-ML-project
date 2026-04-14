@@ -184,3 +184,21 @@ def autoplay(solver_id, target):
         solver.update(guess, fb_ints)
 
         turns.append({"guess": guess.upper(), "feedback": fb_str})
+        if fb_ints == [2, 2, 2, 2, 2]:
+            return {
+                "target": target.upper(),
+                "solver": SOLVERS[solver_id]["name"],
+                "turns": turns,
+                "won": True,
+                "num_guesses": turn + 1,
+            }
+
+    return {
+        "target": target.upper(),
+        "solver": SOLVERS[solver_id]["name"],
+        "turns": turns,
+        "won": False,
+        "num_guesses": 6,
+    }
+
+        
