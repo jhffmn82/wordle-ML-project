@@ -1,59 +1,84 @@
 # Wordle ML: Comparing Heuristics and Machine Learning for Wordle Solving
 
-**Justin Hoffman** UIUC MCS / ISU MSCS Graduate Student
-IT 448 (Graduate Machine Learning), Illinois State University, Spring 2026
+**Justin Hoffman**  
+UIUC MCS / ISU MSCS Graduate Student  
+IT 448 (Graduate Machine Learning), Illinois State University, Spring 2026  
 
-[🌐 Live Demo](https://jhffmn82-wordle-ml.hf.space) · [📓 Evaluation Notebook](notebooks/evaluation.ipynb)
+[📄 Research Paper](https://github.com/jhffmn82/wordle-ML-project/blob/main/paper/wordle_research_paper_v2.pdf) · [🌐 Live Demo](https://jhffmn82-wordle-ml.hf.space) · [📓 Evaluation Notebook](notebooks/evaluation.ipynb)
+
+---
 
 ## Overview
 
-This project compares six algorithmic strategies for solving Wordle, spanning classical heuristics, reinforcement learning, and deep RL, against the provably optimal solution (Bertsimas & Paskov, 2024). All solvers are evaluated against the official Wordle answer list of 2,315 words.
+This project compares six algorithmic strategies for solving Wordle, spanning classical heuristics, reinforcement learning, and deep reinforcement learning, against the provably optimal solution (Bertsimas & Paskov). All solvers are evaluated exhaustively on the official 2,315-word answer set under a closed-vocabulary setting.
 
-The central question: when does a more sophisticated method actually help, and when does understanding the problem structure matter more than model complexity?
+The central question: when does a more sophisticated model actually help, and when does understanding the structure of the problem matter more than model complexity?
+
+---
 
 ## Results
 
-Solver	Type	Win Rate	Avg Guesses	Speed
+| Solver | Type | Win Rate | Avg Guesses | Speed |
+|--------|------|----------|-------------|--------|
+| Optimal (Bertsimas) | Exact DP | 100.0% | 3.421 | — |
+| Rollout (POMDP) | DP / Lookahead | 100.0% | 3.477 | 182.7 it/s |
+| Frequency Heuristic | Heuristic | 100.0% | 3.575 | 19.5 it/s |
+| Information Gain (Minimax) | Heuristic | 100.0% | 3.644 | 2.6 it/s |
+| Tabular Q-Learning | RL | 99.0% | 3.651 | 70.5 it/s |
+| DQN v2 (Teacher-Guided) | Deep RL | 97.7% | 3.678 | 135.6 it/s |
+| DQN v1 (Pure) | Deep RL | 67.2% | 4.582 | 114.4 it/s |
+| Ho (2022) reported | Deep RL | ~98% | ~4.1 | — |
 
-Optimal (Bertsimas 2024)	Exact DP	100.0%	3.421	—
-
-Rollout (POMDP)	DP / Lookahead	100.0%	3.477	182.7 it/s
-
-Frequency Heuristic	Heuristic	100.0%	3.575	19.5 it/s
-
-Information Gain (Minimax)	Heuristic	100.0%	3.644	2.6 it/s
-
-Tabular Q-Learning	RL	99.0%	3.651	70.5 it/s
-
-DQN v2 (Teacher-Guided)	Deep RL	97.7%	3.678	135.6 it/s
-
-DQN v1 (Pure)	Deep RL	67.2%	4.582	114.4 it/s
-
-Ho (2022) reported	Deep RL	~98%	~4.1	—
+---
 
 ## Key Findings
 
-DQN v2 surpassed Ho's reported deep RL results, 3.678 avg guesses vs Ho's ~4.1, using teacher-guided exploration from the rollout solver and Double DQN.
+- **Guided RL works, unguided RL does not.**  
+  DQN v2 significantly outperforms DQN v1 (97.7% vs 67.2%) by replacing random exploration with a rollout-based teacher.
 
-Pure DQN fails catastrophically, DQN v1 achieved only 67.2% win rate due to distribution shift during training.
+- **Simple heuristics are extremely strong.**  
+  The original 2022 frequency solver achieves 100% win rate at 3.575 average guesses, outperforming all learned models.
 
-Simple heuristics remain remarkably competitive, my original 2022 frequency solver achieved 100% win rate at 3.575 avg guesses, beating every ML approach.
+- **Problem structure dominates model complexity.**  
+  The rollout solver performs near-optimally using memoization and explicit lookahead.
 
-Problem structure matters more than model complexity, the rollout solver (a cached lookup table) achieved the best non-optimal performance. Wordle's game tree has only a few hundred unique reachable states.
+- **The effective state space is small.**  
+  Only ~331 unique states are encountered under strong play, despite the NP-hard formulation of the general problem.
+
+---
 
 ## The Solvers
 
-1. Frequency Heuristic: My original 2022 solver. Scores words by letter frequency weighted 3× for positional frequency. 100% win rate, 3.575 avg guesses.
+1. **Frequency Heuristic**  
+   Scores words by letter frequency with 3× weighting for positional frequency.  
+   100% win rate, 3.575 average guesses.
 
-2. Information Gain (Minimax): Picks the guess that minimizes the worst-case partition of remaining words. 100% win rate, 3.644 avg guesses.
+2. **Information Gain (Minimax)**  
+   Selects the guess that minimizes the worst-case partition of remaining candidates.  
+   100% win rate, 3.644 average guesses.
 
-3. DQN v1 (Pure): Deep Q-Network following Ho (2022): 417→512→512→130 architecture with 4-tier curated exploration curriculum. Training collapses due to distribution shift. 67.2% win rate.
+3. **DQN v1 (Pure)**  
+   Deep Q-Network following Ho (2022): 417 → 512 → 512 → 130 architecture.  
+   Trained with epsilon-greedy exploration.  
+   Suffers from distribution shift and unstable learning.  
+   67.2% win rate.
 
-4. DQN v2 (Teacher-Guided): Same architecture, trained with the rollout solver as a live teacher using Double DQN. +20 reward bonus for matching teacher moves. 97.7% win rate, 3.678 avg guesses.
+4. **DQN v2 (Teacher-Guided)**  
+   Same architecture as v1, but uses the rollout solver as a teacher during training.  
+   Improves exploration and stabilizes learning.  
+   97.7% win rate, 3.678 average guesses.
 
-5. Tabular Q-Learning: Following Anderson & Meyer (2022). Learns which of 5 heuristic strategies to use at each game state. Only ~19 reachable states. 99.0% win rate.
+5. **Tabular Q-Learning**  
+   Learns which of five heuristic strategies to apply based on game state.  
+   Only ~19 reachable states.  
+   99.0% win rate.
 
-6. Rollout (POMDP): Following Bhambri et al. (2022). One-step lookahead policy improvement over the frequency heuristic. Memoized cache covers the full game tree. 100% win rate, 3.477 avg guesses.
+6. **Rollout (POMDP)**  
+   One-step lookahead policy improvement over the frequency heuristic.  
+   Memoized cache captures the effective game tree.  
+   100% win rate, 3.477 average guesses.
+
+---
 
 ## Project Structure
 
@@ -64,52 +89,53 @@ wordle-ML-project/
 │   ├── state_encoder.py       # 417-dim state vector for DQN
 │   └── word_lists.py          # Curated curriculum from solver analysis
 ├── solvers/
-│   ├── frequency_solver.py    # Letter freq + positional freq scoring
-│   ├── infogain_solver.py     # Minimax worst-case partition
+│   ├── frequency_solver.py    # Letter + positional frequency scoring
+│   ├── infogain_solver.py     # Minimax partitioning
 │   ├── dqn_solver.py          # 512×512 MLP, 130-dim output
-│   ├── tabular_q_solver.py    # 5 strategies, ~19 reachable states
-│   └── rollout_solver.py      # Memoized rollout with disk cache
+│   ├── tabular_q_solver.py    # Strategy-level RL
+│   └── rollout_solver.py      # Memoized rollout with cache
 ├── models/                    # Trained weights and caches
 ├── web/
-│   ├── app.py                 # Flask web server
-│   ├── solver_adapter.py      # Uniform solver interface for web API
+│   ├── app.py                 # Flask backend
+│   ├── solver_adapter.py      # Unified solver interface
 │   └── templates/
-│       └── index.html         # Single-page app frontend
+│       └── index.html         # Frontend UI
 ├── notebooks/
-│   └── evaluation.ipynb       # Training & evaluation (Google Colab)
-├── wordle.txt                 # 2,315 official Wordle answer words
-├── Dockerfile                 # Hugging Face Spaces deployment
+│   └── evaluation.ipynb       # Training & evaluation
+├── paper/
+│   └── wordle_research_paper_v2.pdf
+├── wordle.txt                 # Official answer list (2,315 words)
+├── Dockerfile                 # Deployment (Hugging Face Spaces)
 └── requirements.txt
 ```
 
+---
+
 ## Web App
 
-The live demo has three modes:
+The live demo supports three modes:
 
-Solver Assistant: Play Wordle with AI help. Enter guesses, click tiles to set feedback colors, and get suggestions from any of the 6 solvers.
+- **Solver Assistant**  
+  Play Wordle with AI assistance. Enter guesses and feedback to receive suggestions.
 
-Autoplay: Enter a target word and watch a solver play the game step by step with animated tile reveals.
+- **Autoplay**  
+  Watch any solver play a full game step by step.
 
-About: Full results, methodology, solver descriptions, and charts.
+- **About**  
+  Includes methodology, results, and solver comparisons.
 
-Hosted on Hugging Face Spaces via Docker.
+Hosted on Hugging Face Spaces using Docker.
+
+---
 
 ## Inspiration
 
-This project started with a Python Wordle solver I built in 2022 as a fun challenge from a coworker. I was also heavily inspired by Andrew Ho's "Wordle Solving with Deep Reinforcement Learning", which provided the DQN architecture (417-dim state, 130-dim output dot-producted with word encodings) that I adapted for this project.
+This project originated from a Wordle solver I built in 2022 as a personal challenge.  
+It was later extended into a formal machine learning study inspired by Andrew Ho’s work on deep reinforcement learning for Wordle.
+
+---
 
 ## References
 
-Anderson, B.J. & Meyer, J.G. (2022). Finding the optimal human strategy for Wordle. arXiv:2202.00557.
-
-Bertsimas, D. & Paskov, A. (2024). An Exact and Interpretable Solution to Wordle. Operations Research, 72(6), 2319–2332.
-
-Bhambri, S., Bhattacharjee, A. & Bertsekas, D.P. (2022). RL Methods for Wordle: A POMDP/Adaptive Control Approach. arXiv:2211.10298.
-
-Ho, A. (2022). Solving Wordle with Reinforcement Learning.
-
-Liu, C.-L. (2022). Using Wordle for Learning to Design and Compare Strategies. IEEE Conference on Games (CoG).
-
-Lokshtanov, D. & Subercaseaux, B. (2022). Wordle is NP-Hard. arXiv:2203.16713.
-
-Mnih, V. et al. (2015). Human-level control through deep reinforcement learning. Nature, 518, 529–533.
+See full references in the research paper:  
+👉 https://github.com/jhffmn82/wordle-ML-project/blob/main/paper/wordle_research_paper_v2.pdf
